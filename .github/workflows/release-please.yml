@@ -1,0 +1,53 @@
+name: Release Please
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: release-please-${{ github.repository }}
+  cancel-in-progress: false
+jobs:
+  release-please:
+    if: github.ref_type == 'branch' && github.ref_name != 'feature/dev' && github.ref_name == (vars.RELEASE_BRANCH || 'main')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    outputs:
+      released: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          target-branch: ${{ vars.RELEASE_BRANCH || 'main' }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+  quality:
+    needs: release-please
+    if: needs.release-please.outputs.released == 'true'
+    uses: ./.github/workflows/quality.yml
+    with:
+      ref: ${{ needs.release-please.outputs.tag }}
+  test:
+    needs: [release-please, quality]
+    uses: ./.github/workflows/test.yml
+    with:
+      ref: ${{ needs.release-please.outputs.tag }}
+  build:
+    needs: [release-please, test]
+    uses: ./.github/workflows/build.yml
+    with:
+      ref: ${{ needs.release-please.outputs.tag }}
+  release:
+    needs: [release-please, build]
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag }}

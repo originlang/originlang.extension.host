@@ -1,0 +1,54 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/protocol",
+    "crates/permission",
+    "crates/manifest",
+    "crates/storage",
+    "crates/scheduler",
+    "crates/session",
+    "crates/runtime",
+    "crates/runtime-quickjs",
+    "crates/runtime-process",
+    "crates/signing",
+    "crates/host",
+    "apps/sandbox",
+    "apps/cli",
+]
+
+[workspace.package]
+version = "0.1.0" # x-release-please-version
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+repository = "https://github.com/originlang/originlang.extension.host"
+
+[workspace.dependencies]
+# 公共依赖
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+clap = { version = "4", features = ["derive"] }
+sha2 = "0.10"
+getrandom = "0.2"
+ed25519-dalek = "2"
+
+# 内部 crate
+originlang-ext-protocol = { path = "crates/protocol" }
+originlang-ext-permission = { path = "crates/permission" }
+originlang-ext-manifest = { path = "crates/manifest" }
+originlang-ext-storage = { path = "crates/storage" }
+originlang-ext-scheduler = { path = "crates/scheduler" }
+originlang-ext-session = { path = "crates/session" }
+originlang-ext-runtime = { path = "crates/runtime" }
+originlang-ext-runtime-quickjs = { path = "crates/runtime-quickjs" }
+originlang-ext-runtime-process = { path = "crates/runtime-process" }
+originlang-ext-signing = { path = "crates/signing" }
+originlang-ext-host = { path = "crates/host" }
+
+[profile.dev]
+debug = 1
+
+[profile.release]
+lto = "thin"

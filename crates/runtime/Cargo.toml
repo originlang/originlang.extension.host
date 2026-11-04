@@ -1,0 +1,13 @@
+[package]
+name = "originlang-ext-runtime"
+description = "Runtime abstraction implemented by every execution backend"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+originlang-ext-protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true

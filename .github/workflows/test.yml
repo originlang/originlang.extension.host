@@ -1,0 +1,38 @@
+name: Test
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact commit or release tag to validate and build
+        type: string
+        default: ""
+permissions:
+  contents: read
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: '0'
+      RUST_BACKTRACE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+      - name: Install repository toolchain
+        run: rustup show active-toolchain
+      # Runtime tests require an actual sandbox binary next to target/debug.
+      - name: Build binaries for process integration tests
+        run: cargo build --locked --workspace --bins
+      - name: Unit, integration and documentation tests
+        run: cargo test --locked --workspace

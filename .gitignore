@@ -1,0 +1,14 @@
+# 构建产物
+/target
+**/*.rs.bk
+
+# 本地临时目录（冒烟测试、TCP 验证脚本等）
+/tmp
+
+# 参考副本：内部 bootidea 插件引擎，仅作设计参照，不纳入版本库
+/bootidea.rust
+
+.DS_Store
+
+# CI release archives
+/dist

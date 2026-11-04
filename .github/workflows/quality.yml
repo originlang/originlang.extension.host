@@ -1,0 +1,34 @@
+name: Quality
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact commit or release tag to validate and build
+        type: string
+        default: ""
+permissions:
+  contents: read
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+      - name: Install repository toolchain
+        run: rustup show active-toolchain
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Validate synchronized release versions
+        env:
+          RELEASE_REF: ${{ inputs.ref || github.ref }}
+        run: python .github/scripts/check-release.py
+      - name: Test nightly publication guards (mock GitHub)
+        run: python .github/scripts/test-nightly.py

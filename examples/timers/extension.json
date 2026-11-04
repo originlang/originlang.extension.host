@@ -1,0 +1,10 @@
+{
+  "id": "timers",
+  "name": "Timers",
+  "version": "0.1.0",
+  "apiVersion": "1",
+  "main": "main.js",
+  "description": "Recurring timer that publishes an event on every tick",
+  "capabilities": ["log.write", "timer.schedule", "events.emit"],
+  "activationEvents": ["onStartup"]
+}

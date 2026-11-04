@@ -1,0 +1,61 @@
+name: Build
+on:
+  workflow_call:
+    inputs:
+      channel:
+        description: Package channel (stable or nightly)
+        type: string
+        default: stable
+      ref:
+        description: Exact commit or release tag to validate and build
+        type: string
+        default: ""
+permissions:
+  contents: read
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: '0'
+      BUILD_TARGET: ${{ matrix.target }}
+      BUILD_CHANNEL: ${{ inputs.channel }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+      - name: Install repository toolchain
+        run: rustup show active-toolchain
+      - name: Build release binaries
+        run: cargo build --locked --release --workspace --bins --target $env:BUILD_TARGET
+      - name: Smoke test both packaged executables
+        run: |
+          $suffix = if ($IsWindows) { '.exe' } else { '' }
+          $binary = "./target/$env:BUILD_TARGET/release/oext$suffix"
+          & $binary --version
+          if ($LASTEXITCODE -ne 0) { throw 'Version check failed' }
+          & $binary run ./examples/hello --method greet --grant-all
+          if ($LASTEXITCODE -ne 0) { throw 'Sandbox smoke test failed' }
+      - name: Package binaries and documentation
+        run: ./.github/scripts/package.ps1 -Target $env:BUILD_TARGET -Channel $env:BUILD_CHANNEL
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

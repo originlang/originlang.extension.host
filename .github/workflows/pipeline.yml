@@ -1,0 +1,33 @@
+name: CI/CD
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  quality:
+    uses: ./.github/workflows/quality.yml
+  test:
+    needs: quality
+    uses: ./.github/workflows/test.yml
+  build:
+    needs: test
+    uses: ./.github/workflows/build.yml
+    with:
+      channel: ${{ github.ref == 'refs/heads/feature/dev' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && 'nightly' || 'stable' }}
+  nightly:
+    if: github.ref == 'refs/heads/feature/dev' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    needs: build
+    permissions:
+      contents: write
+    uses: ./.github/workflows/nightly.yml
