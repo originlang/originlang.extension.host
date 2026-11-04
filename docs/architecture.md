@@ -118,7 +118,7 @@ apps/sandbox           │
 | D4 | 沙箱子进程只链接 `protocol`/`runtime`/`runtime-quickjs` | 隔离强度来自"进程里没有可用的越界手段"，而不是运行时检查；依赖树本身就是约束，可被 `cargo tree -p originlang-ext-sandbox` 直接审计 | 沙箱不能自行读包目录，源码由父进程下发 |
 | D4 | 事件投递不排队 | 无界队列会被慢消费者拖垮内存；有界队列会静默丢事件且难以观测 | 繁忙实例会跳过事件，仅记日志 |
 | D5 | 安装后校验内容哈希 | 磁盘上的包是攻击面；不校验则"安装时审查过的内容"与"实际运行的代码"可能不同 | 原地修改需重新安装 |
-| D6 | CLI 迁出到独立仓库 `bootidea.cli` | 入口与库的发布节奏不同：入口要独立发版与分发，而库消费者不该被迫引入 clap、config 与 tiny_http | 跨仓库 path 依赖，需并列检出 |
+| D6 | CLI 迁出到独立仓库 `bootidea.cli` | 入口与库的发布节奏不同：入口要独立发版与分发，而库消费者不该被迫引入 clap、config 与 tiny_http | 宿主 crate 以 git rev 依赖，升级需显式改 rev；彻底不依赖网络则要先发布到 registry |
 
 ### CLI 归属
 
