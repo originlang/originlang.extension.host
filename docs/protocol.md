@@ -4,7 +4,7 @@
 
 | 层 | 内容 | 位置 |
 | --- | --- | --- |
-| 传输层 | stdio/TCP 使用 NDJSON；HTTP 使用 POST 请求体 | `apps/cli/src/serve.rs` |
+| 传输层 | stdio/TCP 使用 NDJSON；HTTP 使用 POST 请求体 | `bootidea.cli` 的 `src/serve` |
 | 信封层 | JSON-RPC 2.0：request / notification / response | `crates/protocol` |
 | 方法层 | 三个命名空间：`extension.*`、`host.*`（管理）、`host.*`（能力面） | `crates/protocol` |
 | 语义层 | 能力标识、错误码、版本 | `crates/permission`、`crates/protocol` |
@@ -136,7 +136,7 @@
 
 ### HTTP
 
-- `oext serve --transport http --host 127.0.0.1 --port 7311`，入口 `POST /rpc`。
+- `bootidea serve --transport http --host 127.0.0.1 --port 7311`，入口 `POST /rpc`。
 - 每次请求必须发送 `Authorization: Bearer <token>`，复用会话令牌与单例锁；不使用 `host.authenticate` 握手。
 - `Content-Type: application/json`（可带 charset）；请求体是一个完整 JSON-RPC 对象，可格式化换行，不是 NDJSON。
 - 请求体上限 8 MiB，检查 Content-Length，并对实际读取施加上限（包括 chunked 请求）。

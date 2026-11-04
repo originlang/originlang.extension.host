@@ -16,10 +16,11 @@
         "originlang-ext-runtime",
         "originlang-ext-runtime-quickjs",
         "originlang-ext-runtime-process",
+        "originlang-ext-runtime-dylib",
+        "originlang-ext-plugin-abi",
         "originlang-ext-signing",
         "originlang-ext-host",
-        "originlang-ext-sandbox",
-        "originlang-ext-cli"
+        "originlang-ext-sandbox"
       ],
       "merge": false
     },
@@ -94,6 +95,18 @@
       "skip-github-release": true,
       "skip-changelog": true
     },
+    "crates/runtime-dylib": {
+      "release-type": "rust",
+      "component": "originlang-ext-runtime-dylib",
+      "skip-github-release": true,
+      "skip-changelog": true
+    },
+    "crates/plugin-abi": {
+      "release-type": "rust",
+      "component": "originlang-ext-plugin-abi",
+      "skip-github-release": true,
+      "skip-changelog": true
+    },
     "crates/signing": {
       "release-type": "rust",
       "component": "originlang-ext-signing",
@@ -109,12 +122,6 @@
     "apps/sandbox": {
       "release-type": "rust",
       "component": "originlang-ext-sandbox",
-      "skip-github-release": true,
-      "skip-changelog": true
-    },
-    "apps/cli": {
-      "release-type": "rust",
-      "component": "originlang-ext-cli",
       "skip-github-release": true,
       "skip-changelog": true
     }

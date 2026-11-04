@@ -53,6 +53,9 @@ pub fn required_capability(method: &str) -> Option<&'static str> {
         method::HOST_EVENTS_EMIT => Some(capability::EVENTS_EMIT),
         method::HOST_EVENTS_SUBSCRIBE => Some(capability::EVENTS_SUBSCRIBE),
         method::HOST_EXTENSION_CALL_OUT => Some(capability::EXTENSION_CALL),
+        // Discovery is a prerequisite for calling, not a separate privilege:
+        // an extension that may invoke others may also learn which ones exist.
+        method::HOST_EXTENSION_LIST => Some(capability::EXTENSION_CALL),
         _ => None,
     }
 }
@@ -149,11 +152,12 @@ impl Inner {
             method::HOST_EVENTS_EMIT => self.host_events_emit(extension, params),
             method::HOST_EVENTS_SUBSCRIBE => self.host_events_subscribe(extension, params),
             method::HOST_EXTENSION_CALL_OUT => self.host_extension_call(extension, params),
+            method::HOST_EXTENSION_LIST => self.host_extension_list(extension, params),
             method::HOST_SELF_INFO => Ok(json!({
                 "id": extension,
                 "hostVersion": HOST_VERSION,
                 "apiVersion": API_VERSION,
-                "runtime": self.provider.kind(),
+                "runtime": self.runtime_of(extension),
                 "capabilities": self.grants(extension),
             })),
             other => Err(RpcError::new(
@@ -291,6 +295,40 @@ impl Inner {
         let call_params = param(&params, "params").cloned();
         self.call(&target, &target_method, call_params)
             .map_err(|error| error.to_rpc())
+    }
+
+    /// `host.extension.list`: the tool surface, not the full inventory.
+    ///
+    /// A caller sees identity, liveness and contribution points — enough to
+    /// build a tool table — but not paths, hashes or grants. Those describe the
+    /// installation rather than what an extension can use, and leaking them to
+    /// every plugin would turn a routine query into reconnaissance.
+    ///
+    /// `contributes` is forwarded verbatim because a tool description is
+    /// written by the provider precisely to be read by a consumer.
+    fn host_extension_list(
+        &self,
+        _extension: &str,
+        _params: Option<Value>,
+    ) -> Result<Value, RpcError> {
+        let scan = self
+            .registry
+            .scan()
+            .map_err(|error| RpcError::new(code::OPERATION_FAILED, error.to_string()))?;
+        let items: Vec<Value> = scan
+            .extensions
+            .iter()
+            .map(|installed| {
+                let summary = self.summarize(installed);
+                json!({
+                    "id": summary.id,
+                    "enabled": summary.enabled,
+                    "loaded": summary.loaded,
+                    "contributes": summary.contributes,
+                })
+            })
+            .collect();
+        Ok(Value::Array(items))
     }
 }
 

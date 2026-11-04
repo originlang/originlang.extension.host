@@ -42,13 +42,14 @@ jobs:
         run: rustup show active-toolchain
       - name: Build release binaries
         run: cargo build --locked --release --workspace --bins --target $env:BUILD_TARGET
-      - name: Smoke test both packaged executables
+      - name: Smoke test the sandbox binary
         run: |
           $suffix = if ($IsWindows) { '.exe' } else { '' }
-          $binary = "./target/$env:BUILD_TARGET/release/oext$suffix"
-          & $binary --version
-          if ($LASTEXITCODE -ne 0) { throw 'Version check failed' }
-          & $binary run ./examples/hello --method greet --grant-all
+          $binary = "./target/$env:BUILD_TARGET/release/oext-sandbox$suffix"
+          if (-not (Test-Path -LiteralPath $binary)) { throw 'Sandbox binary was not built' }
+          # 沙箱没有命令行界面：它在 stdin 关闭时直接退出 0，这正好是不需要
+          # 构造协议帧的最小启动检查。
+          $null | & $binary
           if ($LASTEXITCODE -ne 0) { throw 'Sandbox smoke test failed' }
       - name: Package binaries and documentation
         run: ./.github/scripts/package.ps1 -Target $env:BUILD_TARGET -Channel $env:BUILD_CHANNEL

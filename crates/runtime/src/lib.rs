@@ -93,7 +93,13 @@ impl Default for RuntimeLimits {
 pub struct RuntimeSpec<'a> {
     /// Installed identity, used for diagnostics and log attribution.
     pub id: &'a str,
-    /// Absolute path of the entry script, already validated to be inside the
+    /// Backend the manifest asked for.
+    ///
+    /// A concrete provider ignores this — it already is the backend. It exists
+    /// so that a router can dispatch, which is the only consumer that needs to
+    /// know the answer before choosing an implementation.
+    pub backend: &'a str,
+    /// Absolute path of the entry module, already validated to be inside the
     /// extension directory.
     pub entry: &'a Path,
     /// Resource ceilings.
@@ -175,6 +181,15 @@ pub trait Runtime: Send {
 pub trait RuntimeProvider: Send + Sync {
     /// Backend identifier, surfaced in diagnostics (`"quickjs"`).
     fn kind(&self) -> &'static str;
+
+    /// Backends reachable through this provider.
+    ///
+    /// A concrete backend is a single value. A router lists everything it was
+    /// built with, which is what makes `host.info` able to report the whole set
+    /// without the host knowing about routers.
+    fn available(&self) -> Vec<&'static str> {
+        vec![self.kind()]
+    }
 
     /// Starts one instance.
     fn start(&self, spec: RuntimeSpec<'_>) -> Result<Box<dyn Runtime>, RpcError>;

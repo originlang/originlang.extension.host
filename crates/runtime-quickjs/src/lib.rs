@@ -266,6 +266,7 @@ mod tests {
     fn start(path: &Path, limits: RuntimeLimits) -> Result<Box<dyn Runtime>, RpcError> {
         QuickJsProvider.start(RuntimeSpec {
             id: "test",
+            backend: "quickjs",
             entry: path,
             limits,
             bridge: Arc::new(NoHost),
@@ -347,6 +348,7 @@ mod tests {
         let mut runtime = QuickJsProvider
             .start(RuntimeSpec {
                 id: "test",
+                backend: "quickjs",
                 entry: &source.0,
                 limits: RuntimeLimits::default(),
                 bridge: Arc::new(ChainProbe),

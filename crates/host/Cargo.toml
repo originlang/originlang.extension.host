@@ -19,3 +19,9 @@ originlang-ext-storage.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+
+# 集成测试要真实驱动后端，因此只在测试期引入 provider 实现。
+# 宿主本身不依赖它们——依赖方向必须保持是「后端实现 → runtime trait ← host」。
+[dev-dependencies]
+originlang-ext-runtime-quickjs.workspace = true
+originlang-ext-runtime-process.workspace = true

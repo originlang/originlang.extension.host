@@ -9,8 +9,9 @@
   "crates/runtime": "0.1.0",
   "crates/runtime-quickjs": "0.1.0",
   "crates/runtime-process": "0.1.0",
+  "crates/runtime-dylib": "0.1.0",
+  "crates/plugin-abi": "0.1.0",
   "crates/signing": "0.1.0",
   "crates/host": "0.1.0",
-  "apps/sandbox": "0.1.0",
-  "apps/cli": "0.1.0"
+  "apps/sandbox": "0.1.0"
 }

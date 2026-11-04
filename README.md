@@ -1,15 +1,17 @@
 # OriginLang Extension Host
 
-以 Rust 实现的扩展宿主平台：负责扩展的**安装、授权、隔离执行、状态持久化、定时任务与事件分发**，并以 JSON-RPC 对外提供服务。
+以 Rust 实现的扩展宿主平台：负责扩展的**安装、授权、隔离执行、状态持久化、定时任务与事件分发**，并可经 JSON-RPC 对外提供服务。
 
-当前版本 `0.1.0`，提供两个执行后端：默认的**进程外沙箱**（每实例一个 `oext-sandbox` 进程）与可选的**进程内 QuickJS 工作线程**。
+本仓库只产出**库与执行体**：宿主是 `originlang-ext-host` crate，执行侧是 `oext-sandbox` 可执行文件。命令入口不在这里，而在独立仓库 `bootidea.cli`——同一个宿主只有一个消费者，入口不该有第二份实现。
+
+当前版本 `0.1.0`，提供三个执行后端：默认的**进程外沙箱**（每实例一个 `oext-sandbox` 进程）、**进程内 QuickJS 工作线程**，以及给一等方插件用的**动态库**。`bootidea` 默认按清单里的 `runtime` 字段逐个路由，一份进程里可以同时跑脚本插件与原生插件；取舍见 [docs/backends.md](docs/backends.md)。
 
 ## 特性
 
 | 能力 | 现状 |
 | --- | --- |
-| 扩展格式 | `extension.json` + `main.js`，安装时校验并记录 SHA-256 |
-| 执行隔离 | 默认每扩展独立进程（Job Object / PDEATHSIG 收尸），可切回进程内线程；堆/栈/墙钟上限按清单配置 |
+| 扩展格式 | `extension.json` + `main.js`（或 `runtime: dylib` 时的 `main.dll`），安装时校验并记录 SHA-256 |
+| 执行隔离 | 默认每扩展独立进程（Job Object / PDEATHSIG 收尸），可切回进程内线程；堆/栈/墙钟上限按清单配置。`dylib` 后端不隔离，仅限一等方插件 |
 | 授权模型 | 清单声明能力，运维显式授予；加载与每次调用双重校验，裁决永远在父进程 |
 | 状态存储 | 按扩展 id 命名空间隔离，文件后端，原子写入 |
 | 定时任务 | 一次性/重复任务，归属扩展卸载时自动取消 |
@@ -22,42 +24,43 @@
 
 ```sh
 cargo build --release
-export PATH="$PWD/target/release:$PATH"
-export OEXT_HOME="$PWD/tmp/home"     # 可选：默认走平台数据目录
+export PATH="$PWD/target/release:$PATH"   # 让 bootidea 找到 oext-sandbox
+export OEXT_HOME="$PWD/tmp/home"          # 可选：默认走平台数据目录
 
+# 以下命令由 bootidea.cli 提供
 # 1. 生成模板
-oext ext init demo
+bootidea ext init demo
 
 # 2. 安装并授予清单声明的能力
-oext ext install ./demo --grant log.write
+bootidea ext install ./demo --grant log.write
 
 # 3. 直接运行一次（临时安装，不污染正式目录）
-oext run ./demo --method hello --params '{"name":"OriginLang"}' --grant-all
+bootidea run ./demo --method hello --params '{"name":"OriginLang"}' --grant-all
 
 # 4. 以 stdio 方式提供服务
 printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"host.info"}' \
   '{"jsonrpc":"2.0","id":2,"method":"host.extension.call","params":{"id":"demo","method":"hello"}}' \
-  '{"jsonrpc":"2.0","id":3,"method":"host.shutdown"}' | oext serve
+  '{"jsonrpc":"2.0","id":3,"method":"host.shutdown"}' | bootidea serve
 ```
 
-`oext run` / `oext serve` 默认使用进程外沙箱，需要 `oext-sandbox` 与 `oext` 位于同一目录（或用 `OEXT_SANDBOX_BIN` 指定）。调试时可用 `--backend quickjs` 回到同进程执行：
+`bootidea run` / `bootidea serve` 默认使用进程外沙箱，需要 `oext-sandbox` 在 `PATH` 上（或用 `OEXT_SANDBOX_BIN` 指定完整路径）。调试时可用 `--backend quickjs` 回到同进程执行：
 
 ```sh
-oext --backend quickjs run ./demo --method hello
+bootidea --backend quickjs run ./demo --method hello
 ```
 
 TCP 方式：
 
 ```sh
-oext serve --transport tcp --port 7311
+bootidea serve --transport tcp --port 7311
 # 输出 pairing token，客户端首个请求必须是 host.authenticate
 ```
 
 HTTP 方式（`std` 是 `stdio` 的别名）：
 
 ```sh
-oext serve --transport http --port 7311
+bootidea serve --transport http --port 7311
 # 从启动日志或 host.json 获取 token
 curl http://127.0.0.1:7311/rpc \
   -H "Authorization: Bearer <token>" \
@@ -75,20 +78,20 @@ HTTP 每次请求都需携带令牌；请求体是一个完整 JSON-RPC 对象�
 
 ```sh
 # 1. 生成密钥（私钥留在包目录之外）
-oext keygen --out ~/keys/acme.key --publisher acme
+bootidea keygen --out ~/keys/acme.key --publisher acme
 
 # 2. 给包签名，生成 extension.sig
-oext sign ./demo --key ~/keys/acme.key
+bootidea sign ./demo --key ~/keys/acme.key
 
 # 3. 在该宿主上信任这个公钥
-oext trust add <publicKey> --name acme     # keygen 会直接打印这条命令
-oext trust list
+bootidea trust add <publicKey> --name acme     # keygen 会直接打印这条命令
+bootidea trust list
 
 # 4. 只接受受信发布者签名的包
-oext --require-signature ext install ./demo --grant log.write
+bootidea --require-signature ext install ./demo --grant log.write
 ```
 
-签名负载为 `oext-signature-v1\n<publisher>\n<id>\n<version>\n<content hash>\n`，因此发布者名、扩展身份、版本与代码四者被绑定在一起：换名字、换版本、改代码都会让签名失效。`oext ext list` / `oext ext info` 会显示 `publisher` 与 `trusted`。
+签名负载为 `oext-signature-v1\n<publisher>\n<id>\n<version>\n<content hash>\n`，因此发布者名、扩展身份、版本与代码四者被绑定在一起：换名字、换版本、改代码都会让签名失效。`bootidea ext list` / `bootidea ext info` 会显示 `publisher` 与 `trusted`。
 
 ## 目录结构
 
@@ -102,15 +105,16 @@ crates/session           令牌、发现文件、存活探测、单例锁
 crates/runtime           运行时后端 trait（宿主唯一依赖的执行抽象）
 crates/runtime-quickjs   QuickJS 引擎与进程内后端
 crates/runtime-process   进程外后端：拉起沙箱、管道协议、Job Object
+crates/runtime-dylib     动态库后端：加载一等方原生插件
+crates/plugin-abi        宿主与插件共用的 C ABI、信封与 panic 守卫
 crates/signing           Ed25519 包签名、密钥文件、发布者信任库
 crates/host              注册表、生命周期、Host API、事件、定时器
 apps/sandbox             oext-sandbox：只链接 protocol/runtime/quickjs 的执行体
-apps/cli                 oext 命令
 examples                 hello / timers / notes
-docs                     架构、协议、安全
+docs                     架构、协议、后端、安全
 ```
 
-CLI 与库同仓的理由与拆分条件见 [docs/architecture.md](docs/architecture.md)。
+命令行入口在独立仓库 `bootidea.cli`：它以 path 依赖链接本仓库的 crate，装配后端并实现全部子命令。库的契约在这里演进，入口的适配在那里演进，两者独立发版。
 
 ## 能力模型
 
@@ -132,6 +136,7 @@ CLI 与库同仓的理由与拆分条件见 [docs/architecture.md](docs/architec
 ## 文档
 
 - [架构与设计决策](docs/architecture.md)
+- [执行后端与插件形态](docs/backends.md)
 - [协议、清单与 Host API](docs/protocol.md)
 - [安全模型与边界](docs/security.md)
 
@@ -207,8 +212,8 @@ Cargo 版本和 Release Please manifest 不变，程序 `--version` 仍显示当
 不配置额外 token 时，合并后的标签验证、构建和上传仍会在同一工作流运行。
 
 工具链由 `rust-toolchain.toml` 指定，Cargo 使用 `--locked`，需提交 Cargo.lock。
-产物包括 Windows x64 ZIP、Linux x64 tar.gz 和 SHA-256；每个包包含 `oext`、`oext-sandbox`、
-README、CHANGELOG、文档及示例。Linux 包在 Ubuntu 24.04 构建，需要兼容的 glibc；未提供 musl 包。
+产物包括 Windows x64 ZIP、Linux x64 tar.gz 和 SHA-256；每个包包含 `oext-sandbox`、
+README、CHANGELOG、文档及示例。宿主库不在包内——它由 Cargo 依赖引入；命令行入口也不在包内，它由 `bootidea.cli` 独立发布。Linux 包在 Ubuntu 24.04 构建，需要兼容的 glibc；未提供 musl 包。
 普通 CI 产物保留 14 天，发行产物保存到 GitHub Release。
 
 参考：[Release Please manifest](https://github.com/googleapis/release-please/blob/main/docs/manifest-releaser.md)

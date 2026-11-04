@@ -1,0 +1,11 @@
+[package]
+name = "originlang-ext-plugin-abi"
+description = "C ABI shared by the host and first-party dynamic plugins"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde_json.workspace = true

@@ -34,7 +34,7 @@ apps/sandbox           │
       └───────┬────────┘
             host
               │
-           apps/cli
+   bootidea.cli（独立仓库）
 ```
 
 依赖方向严格单向：`host` 只经 `runtime` trait 触达执行后端，不认识任何具体引擎。`apps/sandbox` 的执行体则是这条依赖链的**反向证据**：它只依赖 `protocol`、`runtime`、`runtime-quickjs`，不链接 `host`、`storage`、`permission`——沙箱进程里根本没有授权代码、没有存储实现、没有安装目录，因此它除了向父进程发 JSON-RPC 之外无路可走。
@@ -89,8 +89,7 @@ apps/sandbox           │
 
 锁顺序：`slots(RwLock)` → `Slot.runtime(Mutex)` → 运行时内部通道。定时器与事件投递使用 `try_lock`，实例繁忙时跳过并记日志，不阻塞调度线程，也就不存在跨线程锁倒置。
 
-**跨线程调用链**是进程后端引入的唯一新问题：`a → b` 之后，`b` 的回调在**另一个**读线程上执行，线程本地栈是空的，`b → a` 就不会被识别为重入，而是阻塞在 `a` 的实例锁上。解决办法是把调用链随调用一起传下去（`CallChain`），由 `host` 在派生线程上安装回线程本地，`ExtensionBridge` 再按扩展 id 归一化。`apps/cli/tests/sandbox.rs::a_chain_of_calls_across_processes_cannot_deadlock` 专门验证这条路径。
-
+**跨线程调用链**是进程后端引入的唯一新问题：`a → b` 之后，`b` 的回调在**另一个**读线程上执行，线程本地栈是空的，`b → a` 就不会被识别为重入，而是阻塞在 `a` 的实例锁上。解决办法是把调用链随调用一起传下去（`CallChain`），由 `host` 在派生线程上安装回线程本地，`ExtensionBridge` 再按扩展 id 归一化。`crates/host/tests/sandbox.rs::a_chain_of_calls_across_processes_cannot_deadlock` 专门验证这条路径。
 ## 生命周期
 
 ```
@@ -119,23 +118,22 @@ apps/sandbox           │
 | D4 | 沙箱子进程只链接 `protocol`/`runtime`/`runtime-quickjs` | 隔离强度来自"进程里没有可用的越界手段"，而不是运行时检查；依赖树本身就是约束，可被 `cargo tree -p originlang-ext-sandbox` 直接审计 | 沙箱不能自行读包目录，源码由父进程下发 |
 | D4 | 事件投递不排队 | 无界队列会被慢消费者拖垮内存；有界队列会静默丢事件且难以观测 | 繁忙实例会跳过事件，仅记日志 |
 | D5 | 安装后校验内容哈希 | 磁盘上的包是攻击面；不校验则"安装时审查过的内容"与"实际运行的代码"可能不同 | 原地修改需重新安装 |
-| D6 | CLI 留在同一 workspace | 协议仍在演进，原子提交 + 端到端测试收益大于拆分；库消费者不会因此引入 clap | 发布节奏被绑定 |
+| D6 | CLI 迁出到独立仓库 `bootidea.cli` | 入口与库的发布节奏不同：入口要独立发版与分发，而库消费者不该被迫引入 clap、config 与 tiny_http | 跨仓库 path 依赖，需并列检出 |
 
 ### CLI 归属
 
-拆分的判断标准是**消费者边界**，不是"是否可执行文件"。当前 `apps/cli` 只依赖各库 crate 的公开 API，逻辑（`commands.rs`/`serve.rs`）不跨 crate 引用；出现以下任一情况时再迁出：
+命令入口已迁到独立仓库 `bootidea.cli`。判断标准是**消费者边界**，不是"是否可执行文件"：
 
-1. 库按版本发布，CLI 需独立 hotfix 或独立分发渠道；
-2. CLI 需同时兼容多个协议版本；
-3. CLI 由独立团队维护；
-4. 宿主嵌入宿主进程，CLI 退化为纯远程客户端。
+- 库消费者不该为一个命令行引入 clap、config、tiny_http；
+- 入口需要独立发版与独立分发渠道；
+- 宿主协议与入口适配可以各自演进，不必互相绑版本。
 
-迁出时移动目录并把 path 依赖改为 crates.io 版本依赖即可，无需改代码。
+集成测试不跟着走：验证库的留在本仓库 `crates/host/tests/`（`host.rs`、`sandbox.rs`、`signing.rs`），验证真实进程与传输的跟着入口走（`bootidea.cli/tests/transports.rs`）。
 
 ## 安装与签名校验
 
 ```
-oext ext install <dir>
+bootidea ext install <dir>
         │
         ├─ 复制到 .staging-<id>-<pid>-<ts>
         ├─ 重读清单、计算内容哈希（extension.json + 入口脚本）
@@ -152,7 +150,7 @@ oext ext install <dir>
 
 | 扩展点 | 做法 |
 | --- | --- |
-| 新执行后端 | 实现 `Runtime` + `RuntimeProvider`；CLI 的 `--backend` 增加一个取值即可 |
+| 新执行后端 | 实现 `Runtime` + `RuntimeProvider`；`bootidea --backend` 增加一个取值即可 |
 | 新 Host API | 在 `protocol::method` 增常量、`api::required_capability` 增映射、`dispatch_host_call` 增分支；三处改动即可，缺任一处会被测试捕获 |
 | 新传输 | 复用 `protocol::read_message/write_line`，实现自己的帧循环，调用 `serve::dispatch` 同级逻辑 |
 | 新存储后端 | 实现 `storage::Storage`，`ScopedStorage` 自动获得命名空间隔离 |

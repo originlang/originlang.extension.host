@@ -1,0 +1,15 @@
+[package]
+name = "originlang-ext-runtime-dylib"
+description = "Dynamic-library backend for first-party extensions"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+libloading = "0.8"
+serde_json.workspace = true
+originlang-ext-plugin-abi.workspace = true
+originlang-ext-protocol.workspace = true
+originlang-ext-runtime.workspace = true

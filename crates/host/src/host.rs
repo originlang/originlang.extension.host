@@ -159,6 +159,18 @@ impl Inner {
             .expect("host inner must outlive its Host")
     }
 
+    /// Backend an installed extension asks for.
+    ///
+    /// Falls back to the provider's own name only when the manifest is gone,
+    /// which cannot happen for a loaded instance; the fallback exists so that
+    /// diagnostics never panic on a partially torn-down host.
+    pub(crate) fn runtime_of(&self, id: &str) -> String {
+        self.registry
+            .get(id)
+            .map(|installed| installed.manifest.runtime_kind().to_owned())
+            .unwrap_or_else(|_| self.provider.kind().to_owned())
+    }
+
     pub(crate) fn record_log(&self, level: &str, extension: Option<&str>, message: &str) {
         if let Ok(mut logs) = self.logs.lock() {
             logs.record(level, extension, message);
@@ -180,7 +192,7 @@ impl Inner {
         ScopedStorage::new(self.storage.clone(), id)
     }
 
-    fn summarize(&self, installed: &InstalledExtension) -> ExtensionSummary {
+    pub(crate) fn summarize(&self, installed: &InstalledExtension) -> ExtensionSummary {
         let id = installed.manifest.id.as_str();
         let slot = self.slot(id);
         ExtensionSummary {
@@ -205,7 +217,9 @@ impl Inner {
             activation_events: installed.manifest.activation_events.clone(),
             publisher: installed.provenance.publisher.clone(),
             trusted: installed.provenance.trusted,
-            runtime: self.provider.kind().to_owned(),
+            // Per-extension, not per-binary: with more than one backend the
+            // provider's own name no longer describes this extension.
+            runtime: installed.manifest.runtime_kind().to_owned(),
             contributes: installed.manifest.contributes.clone(),
         }
     }
@@ -253,6 +267,7 @@ impl Inner {
         let bridge = Arc::new(ExtensionBridge::new(self.this(), id, declared));
         let mut runtime = self.provider.start(RuntimeSpec {
             id,
+            backend: installed.manifest.runtime_kind(),
             entry: &entry,
             limits: RuntimeLimits {
                 memory_bytes: limits.memory_bytes,
@@ -302,7 +317,7 @@ impl Inner {
                 "loaded {} v{} on {}",
                 installed.manifest.name,
                 installed.manifest.version,
-                self.provider.kind()
+                installed.manifest.runtime_kind()
             ),
         );
         Ok(self.summarize(&installed))
@@ -893,6 +908,9 @@ impl Host {
             "hostVersion": HOST_VERSION,
             "apiVersion": API_VERSION,
             "runtime": self.inner.provider.kind(),
+            // What this binary can actually run, as opposed to the name of the
+            // provider holding them; empty when the provider is not a router.
+            "backends": self.inner.provider.available(),
             "root": self.inner.paths.root().to_string_lossy(),
             "startedAt": self.inner.started_at,
             "extensions": { "installed": installed, "loaded": loaded },

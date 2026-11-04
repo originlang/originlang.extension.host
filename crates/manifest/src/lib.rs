@@ -17,6 +17,12 @@ pub const MANIFEST_FILE: &str = "extension.json";
 /// Host API version understood by this build.
 pub const API_VERSION: &str = "1";
 
+/// Backend used when a manifest does not declare one.
+///
+/// QuickJS was the first backend and remains the form every package written
+/// before `runtime` existed was authored in, so it is the only safe default.
+pub const DEFAULT_RUNTIME: &str = "quickjs";
+
 /// Runtime resource limits, taken from the manifest but clamped by the host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -70,8 +76,16 @@ pub struct Manifest {
     pub version: String,
     /// Manifest/host API version, currently `"1"`.
     pub api_version: String,
-    /// Relative path of the entry script.
+    /// Relative path of the entry module.
     pub main: String,
+    /// Backend that executes `main`. Omitted means [`DEFAULT_RUNTIME`].
+    ///
+    /// Resolved against the providers the host was built with, so an unknown
+    /// value fails at load time with the registered list rather than at
+    /// install time: a host that gains a backend later can run packages that
+    /// were installed before it could.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<String>,
     /// Optional one-line description.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -141,7 +155,8 @@ impl Manifest {
                 self.api_version
             )));
         }
-        validate_main(&self.main)?;
+        validate_runtime(self.runtime_kind())?;
+        validate_main(&self.main, self.runtime_kind())?;
 
         let mut seen = BTreeSet::new();
         for capability in &self.capabilities {
@@ -169,6 +184,11 @@ impl Manifest {
     /// Limits after clamping into the host-supported range.
     pub fn effective_limits(&self) -> Limits {
         self.limits.clamped()
+    }
+
+    /// Backend this extension asks for, defaulting to [`DEFAULT_RUNTIME`].
+    pub fn runtime_kind(&self) -> &str {
+        self.runtime.as_deref().unwrap_or(DEFAULT_RUNTIME)
     }
 
     /// True when the extension should be loaded at host startup.
@@ -240,7 +260,27 @@ fn digest(parts: &[&[u8]]) -> String {
     text
 }
 
-fn validate_main(main: &str) -> Result<(), ManifestError> {
+/// Rejects malformed backend identifiers.
+///
+/// The value is not checked against a fixed list on purpose: the set of
+/// backends belongs to the host binary, which may be built with a subset. A
+/// typo still surfaces early, because loading reports the backends that *are*
+/// registered.
+fn validate_runtime(runtime: &str) -> Result<(), ManifestError> {
+    if runtime.is_empty()
+        || runtime.len() > 32
+        || !runtime
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    {
+        return Err(ManifestError::Invalid(
+            "runtime must be a lowercase identifier such as 'quickjs' or 'dylib'".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_main(main: &str, runtime: &str) -> Result<(), ManifestError> {
     let path = Path::new(main);
     let unsafe_component = path
         .components()
@@ -251,10 +291,20 @@ fn validate_main(main: &str) -> Result<(), ManifestError> {
         ));
     }
     let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    if !matches!(extension, "js" | "mjs") {
-        return Err(ManifestError::Invalid(
-            "main must be a .js or .mjs file".into(),
-        ));
+    // The entry extension is what the backend can actually open, so it follows
+    // the backend rather than a single hard-coded list. An unrecognised runtime
+    // falls through to the QuickJS set: it will fail at load with a clearer
+    // message than "wrong file extension" would give.
+    let allowed: &[&str] = match runtime {
+        "dylib" => &["dll", "so", "dylib"],
+        "wasm" => &["wasm"],
+        _ => &["js", "mjs"],
+    };
+    if !allowed.contains(&extension) {
+        return Err(ManifestError::Invalid(format!(
+            "main must be one of {} for the '{runtime}' runtime",
+            allowed.join(", ")
+        )));
     }
     Ok(())
 }

@@ -93,6 +93,7 @@ fn start(
         provider.binary(),
         RuntimeSpec {
             id: "test",
+            backend: "sandbox",
             entry: source.path(),
             limits,
             bridge,

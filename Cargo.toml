@@ -10,10 +10,11 @@ members = [
     "crates/runtime",
     "crates/runtime-quickjs",
     "crates/runtime-process",
+    "crates/plugin-abi",
+    "crates/runtime-dylib",
     "crates/signing",
     "crates/host",
     "apps/sandbox",
-    "apps/cli",
 ]
 
 [workspace.package]
@@ -29,7 +30,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
 thiserror = "2"
-clap = { version = "4", features = ["derive"] }
 sha2 = "0.10"
 getrandom = "0.2"
 ed25519-dalek = "2"
@@ -44,6 +44,8 @@ originlang-ext-session = { path = "crates/session" }
 originlang-ext-runtime = { path = "crates/runtime" }
 originlang-ext-runtime-quickjs = { path = "crates/runtime-quickjs" }
 originlang-ext-runtime-process = { path = "crates/runtime-process" }
+originlang-ext-runtime-dylib = { path = "crates/runtime-dylib" }
+originlang-ext-plugin-abi = { path = "crates/plugin-abi" }
 originlang-ext-signing = { path = "crates/signing" }
 originlang-ext-host = { path = "crates/host" }
 
