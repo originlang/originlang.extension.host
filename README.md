@@ -138,6 +138,7 @@ docs                     架构、协议、后端、安全
 - [架构与设计决策](docs/architecture.md)
 - [执行后端与插件形态](docs/backends.md)
 - [协议、清单与 Host API](docs/protocol.md)
+- [Host 服务契约](docs/service-contract.md)：入口、参数、配置、握手与版本、退出语义
 - [安全模型与边界](docs/security.md)
 
 ## 已知边界
