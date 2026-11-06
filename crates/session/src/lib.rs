@@ -68,39 +68,37 @@ pub fn generate_token() -> io::Result<String> {
     Ok(buffer.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
-/// State directory: `OEXT_STATE_DIR` when set, else `<home>/.originlang-ext`.
+/// State directory: `OEXT_STATE_DIR` when set, else `<home>/run/`.
 ///
 /// The token lives here, so this directory must be as protected as the
-/// extension install directory.
-pub fn state_dir() -> PathBuf {
+/// extension install directory. The `home` argument is the installation root
+/// (see `Paths::root`): the discovery file and singleton lock are scoped per
+/// root, not per machine, so two hosts with different roots run independently.
+pub fn state_dir(home: &Path) -> PathBuf {
     if let Some(dir) = std::env::var_os(STATE_DIR_ENV) {
         return PathBuf::from(dir);
     }
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    home.join(".originlang-ext")
+    home.join("run")
 }
 
 /// Path of the discovery file.
-pub fn state_path() -> PathBuf {
-    state_dir().join(STATE_FILE_NAME)
+pub fn state_path(home: &Path) -> PathBuf {
+    state_dir(home).join(STATE_FILE_NAME)
 }
 
 /// Path of the singleton lock file.
-pub fn lock_path() -> PathBuf {
-    state_dir().join(LOCK_FILE_NAME)
+pub fn lock_path(home: &Path) -> PathBuf {
+    state_dir(home).join(LOCK_FILE_NAME)
 }
 
 /// Writes the discovery file atomically.
 ///
 /// Write-then-rename means a concurrent reader sees either the previous file or
 /// the complete new one, never a half-written JSON document.
-pub fn write_state(state: &SessionState) -> io::Result<PathBuf> {
-    let dir = state_dir();
+pub fn write_state(home: &Path, state: &SessionState) -> io::Result<PathBuf> {
+    let dir = state_dir(home);
     fs::create_dir_all(&dir)?;
-    let path = state_path();
+    let path = state_path(home);
     let temporary = dir.join(format!("{STATE_FILE_NAME}.tmp"));
     let body = serde_json::to_vec_pretty(state)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
@@ -137,8 +135,8 @@ fn restrict_permissions(_path: &Path) -> io::Result<()> {
 }
 
 /// Reads the discovery file, rejecting unknown versions and corruption.
-pub fn read_state() -> Option<SessionState> {
-    let body = fs::read(state_path()).ok()?;
+pub fn read_state(home: &Path) -> Option<SessionState> {
+    let body = fs::read(state_path(home)).ok()?;
     let state: SessionState = serde_json::from_slice(&body).ok()?;
     if state.version != STATE_VERSION {
         return None;
@@ -147,8 +145,8 @@ pub fn read_state() -> Option<SessionState> {
 }
 
 /// Removes the discovery file; missing files are ignored.
-pub fn remove_state() {
-    let _ = fs::remove_file(state_path());
+pub fn remove_state(home: &Path) {
+    let _ = fs::remove_file(state_path(home));
 }
 
 /// Why acquiring the singleton lock failed.
@@ -191,10 +189,10 @@ impl Drop for LockGuard {
 }
 
 /// Acquires the singleton lock, clearing stale locks from dead processes.
-pub fn acquire_lock() -> Result<LockGuard, LockError> {
-    let dir = state_dir();
+pub fn acquire_lock(home: &Path) -> Result<LockGuard, LockError> {
+    let dir = state_dir(home);
     fs::create_dir_all(&dir).map_err(LockError::Io)?;
-    let path = lock_path();
+    let path = lock_path(home);
     let me = std::process::id().to_string();
 
     // Retries cover the race where two processes both decide the same lock is
@@ -307,18 +305,18 @@ pub fn port_open(host: &str, port: u16) -> bool {
 }
 
 /// Returns a live host session, clearing the discovery file when it is stale.
-pub fn discover() -> Option<SessionState> {
-    let state = read_state()?;
+pub fn discover(home: &Path) -> Option<SessionState> {
+    let state = read_state(home)?;
     if is_alive(&state) {
         return Some(state);
     }
     // Leaving a stale file makes every future connect repeat a failing probe
     // with a timeout, and hides the fact that the last exit was abnormal.
-    remove_state();
+    remove_state(home);
     // The lock outlives the discovery file for the same reason: a host that was
     // killed or crashed never ran `LockGuard::drop`. Clear both together so a
     // dead session leaves nothing behind for the next start to trip over.
-    clear_stale_lock();
+    clear_stale_lock(home);
     None
 }
 
@@ -328,11 +326,11 @@ pub fn discover() -> Option<SessionState> {
 /// file and the singleton lock survive it. Every entry point that is about to
 /// trust either file calls this first; otherwise a client keeps probing a dead
 /// port and a new host keeps seeing a lock owned by a recycled pid.
-pub fn prune_stale() {
-    if matches!(read_state(), Some(state) if !is_alive(&state)) {
-        remove_state();
+pub fn prune_stale(home: &Path) {
+    if matches!(read_state(home), Some(state) if !is_alive(&state)) {
+        remove_state(home);
     }
-    clear_stale_lock();
+    clear_stale_lock(home);
 }
 
 /// Deletes the lock file when its owner is provably gone.
@@ -342,11 +340,11 @@ pub fn prune_stale() {
 /// corrupt one, and deleting a live host's lock would let a second host serve the
 /// same data. `acquire_lock` resolves that ambiguity itself, under the
 /// create-new race that makes the decision safe.
-fn clear_stale_lock() {
-    if let Some(pid) = lock_owner(&lock_path())
+fn clear_stale_lock(home: &Path) {
+    if let Some(pid) = lock_owner(&lock_path(home))
         && !process_alive(pid)
     {
-        let _ = fs::remove_file(lock_path());
+        let _ = fs::remove_file(lock_path(home));
     }
 }
 
@@ -401,6 +399,13 @@ mod tests {
         }
     }
 
+    /// A dummy install root. Tests set `OEXT_STATE_DIR`, which outranks `home`,
+    /// so this value is never actually consulted; it only satisfies the new
+    /// per-root signature.
+    fn home() -> PathBuf {
+        PathBuf::from("/tmp/oext-test-home")
+    }
+
     #[test]
     fn tokens_are_unique_and_long_enough() {
         let a = generate_token().unwrap();
@@ -415,23 +420,23 @@ mod tests {
         let _guard = env_lock();
         let _dir = TempStateDir::new("roundtrip");
         let state = sample(54321);
-        write_state(&state).unwrap();
-        assert_eq!(read_state().unwrap(), state);
+        write_state(&home(), &state).unwrap();
+        assert_eq!(read_state(&home()).unwrap(), state);
 
         let mut future = state.clone();
         future.version = STATE_VERSION + 1;
-        write_state(&future).unwrap();
-        assert!(read_state().is_none(), "未知版本必须被识别为不可用");
+        write_state(&home(), &future).unwrap();
+        assert!(read_state(&home()).is_none(), "未知版本必须被识别为不可用");
 
-        fs::write(state_path(), b"{not json").unwrap();
-        assert!(read_state().is_none());
+        fs::write(state_path(&home()), b"{not json").unwrap();
+        assert!(read_state(&home()).is_none());
     }
 
     #[test]
     fn missing_state_file_is_none() {
         let _guard = env_lock();
         let _dir = TempStateDir::new("missing");
-        assert!(read_state().is_none());
+        assert!(read_state(&home()).is_none());
     }
 
     #[test]
@@ -448,13 +453,13 @@ mod tests {
 
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        write_state(&sample(port)).unwrap();
-        assert_eq!(discover().map(|state| state.port), Some(port));
-        assert!(state_path().exists());
+        write_state(&home(), &sample(port)).unwrap();
+        assert_eq!(discover(&home()).map(|state| state.port), Some(port));
+        assert!(state_path(&home()).exists());
 
-        write_state(&sample(1)).unwrap();
-        assert!(discover().is_none());
-        assert!(!state_path().exists(), "陈旧状态文件应被清理");
+        write_state(&home(), &sample(1)).unwrap();
+        assert!(discover(&home()).is_none());
+        assert!(!state_path(&home()).exists(), "陈旧状态文件应被清理");
     }
 
     /// Reproduces the state left behind by a host that was killed: a discovery
@@ -467,13 +472,13 @@ mod tests {
         let mut dead = sample(65535);
         // A pid that cannot exist: probes must treat it as gone on every platform.
         dead.pid = u32::MAX;
-        write_state(&dead).unwrap();
-        fs::write(lock_path(), u32::MAX.to_string()).unwrap();
+        write_state(&home(), &dead).unwrap();
+        fs::write(lock_path(&home()), u32::MAX.to_string()).unwrap();
 
-        prune_stale();
+        prune_stale(&home());
 
-        assert!(!state_path().exists(), "陈旧发现文件应被清理");
-        assert!(!lock_path().exists(), "死进程持有的锁应被清理");
+        assert!(!state_path(&home()).exists(), "陈旧发现文件应被清理");
+        assert!(!lock_path(&home()).exists(), "死进程持有的锁应被清理");
     }
 
     #[test]
@@ -483,13 +488,13 @@ mod tests {
 
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        write_state(&sample(port)).unwrap();
-        let guard = acquire_lock().unwrap();
+        write_state(&home(), &sample(port)).unwrap();
+        let guard = acquire_lock(&home()).unwrap();
 
-        prune_stale();
+        prune_stale(&home());
 
-        assert!(state_path().exists(), "存活会话不得被清理");
-        assert!(lock_path().exists(), "存活的锁不得被清理");
+        assert!(state_path(&home()).exists(), "存活会话不得被清理");
+        assert!(lock_path(&home()).exists(), "存活的锁不得被清理");
         drop(guard);
     }
 
@@ -498,18 +503,18 @@ mod tests {
         let _guard = env_lock();
         let _dir = TempStateDir::new("lock");
 
-        let held = acquire_lock().unwrap();
+        let held = acquire_lock(&home()).unwrap();
         assert_eq!(
-            fs::read_to_string(lock_path()).unwrap().trim(),
+            fs::read_to_string(lock_path(&home())).unwrap().trim(),
             std::process::id().to_string()
         );
-        match acquire_lock() {
+        match acquire_lock(&home()) {
             Err(LockError::Held(pid)) => assert_eq!(pid, std::process::id()),
             other => panic!("应报 Held，实得 {other:?}"),
         }
         drop(held);
-        assert!(!lock_path().exists());
-        assert!(acquire_lock().is_ok(), "释放后应可再次加锁");
+        assert!(!lock_path(&home()).exists());
+        assert!(acquire_lock(&home()).is_ok(), "释放后应可再次加锁");
     }
 
     #[cfg(unix)]
@@ -517,11 +522,11 @@ mod tests {
     fn stale_lock_from_dead_process_is_cleared() {
         let _guard = env_lock();
         let _dir = TempStateDir::new("stale-lock");
-        fs::create_dir_all(state_dir()).unwrap();
-        fs::write(lock_path(), "999999999").unwrap();
-        let guard = acquire_lock().expect("陈旧锁应被清理");
+        fs::create_dir_all(state_dir(&home())).unwrap();
+        fs::write(lock_path(&home()), "999999999").unwrap();
+        let guard = acquire_lock(&home()).expect("陈旧锁应被清理");
         assert_eq!(
-            fs::read_to_string(lock_path()).unwrap().trim(),
+            fs::read_to_string(lock_path(&home())).unwrap().trim(),
             std::process::id().to_string()
         );
         drop(guard);

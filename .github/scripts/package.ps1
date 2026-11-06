@@ -9,6 +9,15 @@ if ($LASTEXITCODE -ne 0) { throw 'Cannot read Cargo metadata' }
 # 宿主引擎是库，唯一发布的二进制是沙箱执行体；版本以工作区根为准。
 $version = (Get-Content -Raw 'version.txt').Trim()
 if (-not $version) { throw 'version.txt is empty' }
+# 正式版以 tag 为准（tag 即版本）：发布工作流传入 RELEASE_TAG=vX.Y.Z，
+# 去掉 v 前缀后必须与 version.txt 一致，否则宁可失败也不发错号。
+if ($Channel -eq 'stable' -and $env:RELEASE_TAG) {
+    $tagVersion = $env:RELEASE_TAG -replace '^v', ''
+    if ($tagVersion -ne $version) {
+        throw "RELEASE_TAG ($tagVersion) and version.txt ($version) disagree"
+    }
+    $version = $tagVersion
+}
 $packageVersion = $version
 if ($Channel -eq 'nightly') {
     if ($env:GITHUB_SHA -notmatch '^[a-f0-9]{40}$' -or $env:GITHUB_RUN_ID -notmatch '^\d+$') {

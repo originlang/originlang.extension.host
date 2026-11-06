@@ -10,6 +10,10 @@ on:
         description: Exact commit or release tag to validate and build
         type: string
         default: ""
+      release_tag:
+        description: Release tag (e.g. v0.1.0) used as the stable package version
+        type: string
+        default: ""
 permissions:
   contents: read
 jobs:
@@ -33,6 +37,7 @@ jobs:
       CARGO_INCREMENTAL: '0'
       BUILD_TARGET: ${{ matrix.target }}
       BUILD_CHANNEL: ${{ inputs.channel }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
     steps:
       - uses: actions/checkout@v4
         with:

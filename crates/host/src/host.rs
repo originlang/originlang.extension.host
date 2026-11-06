@@ -16,6 +16,8 @@ use crate::paths::Paths;
 use crate::registry::{InstalledExtension, Provenance, Registry, SignaturePolicy};
 use originlang_ext_manifest::{API_VERSION, Manifest};
 use originlang_ext_permission::{Policy, validate_identity};
+use originlang_ext_plugin_abi::ABI_VERSION;
+use originlang_ext_protocol::PROTOCOL_VERSION;
 use originlang_ext_runtime::{
     Event, ExtensionInfo, Runtime, RuntimeLimits, RuntimeProvider, RuntimeSpec,
 };
@@ -36,11 +38,19 @@ pub const HOST_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Largest accepted timer delay: 24 hours.
 pub const MAX_TIMER_DELAY_MS: u64 = 24 * 60 * 60 * 1000;
 
+/// Identifies the discovered sandbox executable, reported by `host.hello`.
+#[derive(Debug, Clone, Serialize)]
+pub struct SandboxInfo {
+    /// Sandbox executable version.
+    pub version: String,
+    /// Absolute path of the sandbox executable.
+    pub path: String,
+}
+
 /// Public snapshot of one extension, returned by list/load/install.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ExtensionSummary {
-    /// Stable identity.
+pub struct ExtensionSummary {    /// Stable identity.
     pub id: String,
     /// Display name.
     pub name: String,
@@ -915,6 +925,32 @@ impl Host {
             "startedAt": self.inner.started_at,
             "extensions": { "installed": installed, "loaded": loaded },
         })
+    }
+
+    /// `host.hello` payload: the negotiation handshake on every connection.
+    ///
+    /// Superset of [`Host::info`] plus the service protocol and plugin ABI
+    /// versions a client must compare before driving the host. `sandbox` is
+    /// `None` when the sandbox backend is unavailable, in which case the field
+    /// serializes to `null` so a client can tell "no sandbox" from "not asked".
+    pub fn hello(&self, sandbox: Option<SandboxInfo>) -> Value {
+        let mut payload = self.info();
+        let object = payload.as_object_mut().expect("info() is an object");
+        object.insert(
+            "protocolVersion".to_owned(),
+            Value::String(PROTOCOL_VERSION.to_owned()),
+        );
+        object.insert(
+            "abiVersion".to_owned(),
+            Value::Number(ABI_VERSION.into()),
+        );
+        object.insert(
+            "sandbox".to_owned(),
+            sandbox
+                .map(|info| json!({ "version": info.version, "path": info.path }))
+                .unwrap_or(Value::Null),
+        );
+        payload
     }
 
     /// Stops every instance and the scheduler. Idempotent.

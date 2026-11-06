@@ -21,6 +21,13 @@ use std::io::{BufRead, Read, Write};
 /// JSON-RPC 2.0 protocol version marker.
 pub const JSONRPC_VERSION: &str = "2.0";
 
+/// Service protocol version for the independent host (`host.hello`).
+///
+/// Independent of the JSON-RPC envelope version and the manifest `apiVersion`.
+/// Clients and hosts are compatible when their major versions match; a mismatch
+/// is reported as [`code::INCOMPATIBLE_PROTOCOL`].
+pub const PROTOCOL_VERSION: &str = "1";
+
 /// Upper bound for a single inbound line.
 ///
 /// A peer that never sends a newline would otherwise grow the read buffer until
@@ -63,6 +70,8 @@ pub mod code {
     pub const PERMISSION_DENIED: i64 = -32021;
     /// The request is well formed but rejected by policy (quota, state, ...).
     pub const REJECTED: i64 = -32022;
+    /// The client and host protocol major versions do not match.
+    pub const INCOMPATIBLE_PROTOCOL: i64 = -32023;
 }
 
 /// Canonical method names.
@@ -88,6 +97,8 @@ pub mod method {
     // ---- 客户端侧（管理接口） ----
     /// `host.info` — 宿主版本与运行态摘要。
     pub const HOST_INFO: &str = "host.info";
+    /// `host.hello` — 连接上的首个业务调用，完成版本协商与就绪宣告。
+    pub const HOST_HELLO: &str = "host.hello";
     /// `host.extension.list`
     pub const HOST_EXTENSION_LIST: &str = "host.extension.list";
     /// `host.extension.call`
@@ -139,6 +150,7 @@ pub mod method {
     /// 客户端（stdio/TCP 连接）可以调用的管理方法。
     pub const CLIENT: &[&str] = &[
         HOST_INFO,
+        HOST_HELLO,
         HOST_EXTENSION_LIST,
         HOST_EXTENSION_LOAD,
         HOST_EXTENSION_UNLOAD,
@@ -760,7 +772,7 @@ mod tests {
             }
         }
         // 常量总数：加新方法时这里会先失败，提醒把名字接进某张表。
-        assert_eq!(seen.len(), 28, "方法名总数与分组表不一致");
+        assert_eq!(seen.len(), 29, "方法名总数与分组表不一致");
         for required in [
             method::HOST_SELF_INFO,
             method::EXTENSION_INVOKE,

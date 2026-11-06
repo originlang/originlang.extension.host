@@ -1,32 +1,42 @@
 name: Release
+
+# 发布唯一入口：push vX.Y.Z 标签（tag 即版本号，不依赖 release-please）。
+#   git tag v0.1.1 && git push origin v0.1.1
+# 触发后按 tag 跑 quality → test → build → 创建 Release 并挂资产。
+# 平时分支的 CI 走 pipeline.yml；nightly 走 nightly.yml（由 pipeline.yml 编排）。
 on:
-  workflow_call:
-    inputs:
-      tag:
-        description: Release Please tag whose existing release receives the assets
-        type: string
-        required: true
+  push:
+    tags:
+      - "v*"
+
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  quality:
+    uses: ./.github/workflows/quality.yml
+    with:
+      ref: ${{ github.ref_name }}
+  test:
+    needs: quality
+    uses: ./.github/workflows/test.yml
+    with:
+      ref: ${{ github.ref_name }}
+  build:
+    needs: test
+    uses: ./.github/workflows/build.yml
+    with:
+      channel: stable
+      ref: ${{ github.ref_name }}
+      release_tag: ${{ github.ref_name }}
   release:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: package-*
-          path: dist
-          merge-multiple: true
-      - name: Verify assets and publish GitHub Release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
-          cd dist
-          test "$(find . -maxdepth 1 -name '*.sha256' | wc -l)" -eq 2
-          sha256sum --check ./*.sha256
-          gh release upload "$RELEASE_TAG" ./*.zip ./*.tar.gz ./*.sha256 --clobber
+    needs: build
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-attach.yml
+    with:
+      tag: ${{ github.ref_name }}

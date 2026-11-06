@@ -2,9 +2,9 @@
 
 以 Rust 实现的扩展宿主平台：负责扩展的**安装、授权、隔离执行、状态持久化、定时任务与事件分发**，并可经 JSON-RPC 对外提供服务。
 
-本仓库只产出**库与执行体**：宿主是 `originlang-ext-host` crate，执行侧是 `oext-sandbox` 可执行文件。命令入口不在这里，而在独立仓库 `bootidea.cli`——同一个宿主只有一个消费者，入口不该有第二份实现。
+本仓库产出**库与两个执行体**：宿主是 `originlang-ext-host` crate；服务入口是 `oext-host` 可执行文件（`apps/host`），执行侧是 `oext-sandbox` 可执行文件（`apps/sandbox`）。`oext-host` 是独立交付的服务进程，可自行启动、握手、执行请求并退出，不依赖 `bootidea.cli`；CLI 与 HomeWorld 通过版本化协议连接它（见 [docs/service-contract.md](docs/service-contract.md) 与 [docs/release-contract.md](docs/release-contract.md)）。
 
-当前版本 `0.1.0`，提供三个执行后端：默认的**进程外沙箱**（每实例一个 `oext-sandbox` 进程）、**进程内 QuickJS 工作线程**，以及给一等方插件用的**动态库**。`bootidea` 默认按清单里的 `runtime` 字段逐个路由，一份进程里可以同时跑脚本插件与原生插件；取舍见 [docs/backends.md](docs/backends.md)。
+当前版本 `0.1.0`，提供三个执行后端：默认的**进程外沙箱**（每实例一个 `oext-sandbox` 进程）、**进程内 QuickJS 工作线程**，以及给一等方插件用的**动态库**。`oext-host` 默认按清单里的 `runtime` 字段逐个路由，一份进程里可以同时跑脚本插件与原生插件；取舍见 [docs/backends.md](docs/backends.md)。
 
 ## 特性
 
@@ -43,6 +43,22 @@ printf '%s\n' \
   '{"jsonrpc":"2.0","id":2,"method":"host.extension.call","params":{"id":"demo","method":"hello"}}' \
   '{"jsonrpc":"2.0","id":3,"method":"host.shutdown"}' | bootidea serve
 ```
+
+### 独立服务入口（oext-host）
+
+`oext-host` 不依赖 CLI，可独立下载、启动、握手、执行请求并正常退出。首个业务调用必须是 `host.hello` 完成协议协商：
+
+```sh
+cargo build --release -p originlang-ext-host-bin -p originlang-ext-sandbox
+
+# stdio：握手 → 查询 → EOF 正常退出（退出码 0）
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"host.hello","params":{"protocolVersion":"1"}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"host.info"}' \
+  | ./target/release/oext-host --transport stdio --home "$PWD/tmp/home"
+```
+
+协议主版本不兼容时返回 `-32023` 并关闭连接；`--version` 打印一行版本并退出 `0`；同根目录第二个实例退出 `3`。完整约定见 [docs/service-contract.md](docs/service-contract.md)，发布包结构与校验见 [docs/release-contract.md](docs/release-contract.md)。
 
 `bootidea run` / `bootidea serve` 默认使用进程外沙箱，需要 `oext-sandbox` 在 `PATH` 上（或用 `OEXT_SANDBOX_BIN` 指定完整路径）。调试时可用 `--backend quickjs` 回到同进程执行：
 
@@ -110,11 +126,12 @@ crates/plugin-abi        宿主与插件共用的 C ABI、信封与 panic 守卫
 crates/signing           Ed25519 包签名、密钥文件、发布者信任库
 crates/host              注册表、生命周期、Host API、事件、定时器
 apps/sandbox             oext-sandbox：只链接 protocol/runtime/quickjs 的执行体
+apps/host                oext-host：独立服务入口，承载传输与协议协商
 examples                 hello / timers / notes
-docs                     架构、协议、后端、安全
+docs                     架构、协议、后端、安全、服务契约、发布契约
 ```
 
-命令行入口在独立仓库 `bootidea.cli`：它以 git 依赖（锁定到具体 rev）链接本仓库的 crate，装配后端并实现全部子命令。库的契约在这里演进，入口的适配在那里演进，两者独立发版。
+`oext-host` 是独立交付的服务进程，不依赖 `bootidea.cli`；CLI 以 git 依赖（锁定到具体 rev）链接本仓库的 crate，装配后端并实现全部子命令，同时在迁移期作为 `oext-host` 的协议客户端。库的契约在这里演进，入口的适配在那里演进，两者独立发版。
 
 ## 能力模型
 
@@ -162,24 +179,23 @@ cargo test --workspace
 
 | 文件 | 职责 |
 | --- | --- |
-| `.github/workflows/pipeline.yml` | 分支推送、PR、标签推送和手动 CI |
+| `.github/workflows/pipeline.yml` | 分支推送、PR 和手动 CI（含 feature/dev 的 nightly 编排） |
 | `.github/workflows/quality.yml` | 格式、Clippy、全仓版本一致性与标签校验 |
 | `.github/workflows/test.yml` | Windows / Linux 全部测试 |
 | `.github/workflows/build.yml` | Release 构建、沙箱冒烟测试、打包和 SHA-256 |
-| `.github/workflows/release-please.yml` | 正式发布分支上管理 Release PR；创建 Release 后编排验证与构建 |
+| `.github/workflows/release.yml` | push `vX.Y.Z` 标签时编排 quality → test → build → 创建 Release |
+| `.github/workflows/release-attach.yml` | 将已校验产物创建为 GitHub Release 并上传 |
 | `.github/workflows/nightly.yml` | feature/dev 检查、测试和打包通过后发布 nightly 预发布 |
-| `.github/workflows/release.yml` | 将本次流水线的已校验产物上传到 Release Please 创建的 Release |
 
 ### 发布流程
 
-1. 使用 Conventional Commits，例如 `feat: add HTTP transport`、`fix: handle shutdown`。
-2. 推送到正式发布分支（默认 `main`，可用仓库变量 `RELEASE_BRANCH` 配置）后，Release Please 创建或更新版本 PR。
-3. 合并版本 PR 后，Release Please 创建 `vX.Y.Z` 标签和 GitHub Release。
-4. 同一工作流从该标签检出代码，依次检查、测试、构建并上传程序包。无需手动打标签。
+1. 把 workspace 版本改到目标版本（`Cargo.toml` 的 `[workspace.package].version`、`version.txt`，并同步 `Cargo.lock`），提交。
+2. 打标签并推送：`git tag vX.Y.Z && git push origin vX.Y.Z`。
+3. tag 触发 `release.yml`，从该标签检出代码，依次检查、测试、构建并上传程序包。无需 release-please，也无需手动点按钮。
 
 仅根发布生成 GitHub Release；成员 crate 不单独发布，也不会执行 `cargo publish`。
-Release 页面创建早于二进制上传；若后续阶段失败，可在该次 Actions 运行中重跑失败任务。
-其他分支、PR 和手工推送标签只检查和打包，不创建正式 Release。
+Release 页面创建晚于所有校验与构建，若某阶段失败则整个发布中断（不会出现半套资产）。
+其他分支、PR 只检查和打包，不创建正式 Release。
 
 ### feature/dev nightly
 
@@ -188,34 +204,21 @@ PR 不发布。此处 nightly 表示开发渠道，未配置每日定时任务�
 
 nightly 使用独立标签 `nightly-<run-id>-<sha前8位>`，标记为预发布且不设为 Latest；每次运行保留自己的发行记录。
 压缩包名包含 `nightly.<run-id>.<sha前8位>`，包内 `build-info.json` 记录完整提交 SHA、运行编号和目标平台。
-Cargo 版本和 Release Please manifest 不变，程序 `--version` 仍显示当前 Cargo 版本。
+Cargo 版本和 `version.txt` 不变，程序 `--version` 仍显示当前 Cargo 版本。
 重跑同一次构建会更新同一 nightly 的附件；只重跑失败任务即可重试上传。
-`feature/dev` 始终不运行正式 Release Please，即使它是 GitHub 默认分支或被误填到 `RELEASE_BRANCH`。
+`feature/dev` 始终不运行正式发布，即使它是 GitHub 默认分支。
 
 ### Workspace 配置
 
-`release-please-config.json` 使用 manifest 模式：成员使用 `rust` 策略与 `cargo-workspace` 插件，
-`linked-versions` 将全部成员与根发布绑定到同一版本。`.release-please-manifest.json` 以当前 `0.1.0` 为基线，
-后续根据提交计算新版本。根发布使用 `simple` 策略维护 `version.txt`、根 `CHANGELOG.md`，
-并通过 `extra-files` 更新 `[workspace.package].version`。
-
-这是为了兼容上游 Rust updater 不支持虚拟 workspace 根和继承版本的限制：
-成员的 `version.workspace = true` 改为显式版本，由 Release Please 统一同步；其他 workspace 继承保持不变。
-质量检查会核对根版本、全部成员、Cargo.lock 和发布 manifest，阻止版本漂移。
-新增 crate 时需同时加入发布配置、manifest 与 linked-versions 组。
+workspace 根通过 `[workspace.package].version` 声明统一版本，全部成员 `version.workspace = true` 继承同一版本，
+`version.txt` 作为对外版本号镜像。质量检查会核对根版本、全部成员、Cargo.lock 与（打 tag 时）标签，阻止版本漂移。
+新增 crate 时无需单独维护发布配置；只需保证其版本继承自 workspace 根。
 
 ### GitHub 设置
 
-在 Settings → Actions → General 中允许 GitHub Actions 创建 PR。
-默认使用 `GITHUB_TOKEN`；它创建的 Release PR 不会自动触发另一条 PR CI。
-如需自动运行 Release PR 的分支保护检查，配置仓库 secret `RELEASE_PLEASE_TOKEN`，
-使用具备仓库 Contents、Pull requests、Issues 写权限的 token。工作流优先使用该 secret。
-不配置额外 token 时，合并后的标签验证、构建和上传仍会在同一工作流运行。
+无需任何额外 secret 或 token 配置。发布用 `gh release create`（`GITHUB_TOKEN`）即可，因为它直接在 tag 触发的同一工作流内完成，不依赖「tag 触发下游工作流」的能力。
 
 工具链由 `rust-toolchain.toml` 指定，Cargo 使用 `--locked`，需提交 Cargo.lock。
 产物包括 Windows x64 ZIP、Linux x64 tar.gz 和 SHA-256；每个包包含 `oext-sandbox`、
 README、CHANGELOG、文档及示例。宿主库不在包内——它由 Cargo 依赖引入；命令行入口也不在包内，它由 `bootidea.cli` 独立发布。Linux 包在 Ubuntu 24.04 构建，需要兼容的 glibc；未提供 musl 包。
 普通 CI 产物保留 14 天，发行产物保存到 GitHub Release。
-
-参考：[Release Please manifest](https://github.com/googleapis/release-please/blob/main/docs/manifest-releaser.md)
-与 [Action token 说明](https://github.com/googleapis/release-please-action#other-actions-on-release-please-prs)。

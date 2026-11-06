@@ -15,10 +15,11 @@ members = [
     "crates/signing",
     "crates/host",
     "apps/sandbox",
+    "apps/host",
 ]
 
 [workspace.package]
-version = "0.1.0" # x-release-please-version
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.99"
 license = "MIT"

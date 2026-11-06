@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 originlang-ext-manifest.workspace = true
 originlang-ext-permission.workspace = true
+originlang-ext-plugin-abi.workspace = true
 originlang-ext-protocol.workspace = true
 originlang-ext-runtime.workspace = true
 originlang-ext-scheduler.workspace = true

@@ -25,7 +25,8 @@ pub mod router;
 pub use api::{capability, required_capability};
 pub use error::{HostError, HostResult};
 pub use host::{
-    ExtensionSummary, HOST_VERSION, Host, HostConfig, MAX_TIMER_DELAY_MS, validate_topic,
+    ExtensionSummary, HOST_VERSION, Host, HostConfig, MAX_TIMER_DELAY_MS, SandboxInfo,
+    validate_topic,
 };
 pub use logs::{LogBuffer, LogRecord};
 pub use paths::Paths;
