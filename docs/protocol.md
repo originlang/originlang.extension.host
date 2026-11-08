@@ -136,7 +136,7 @@
 
 ### HTTP
 
-- `bootidea serve --transport http --host 127.0.0.1 --port 7311`，入口 `POST /rpc`。
+- `ol-host --transport http --host 127.0.0.1 --port 7311`，入口 `POST /rpc`。
 - 每次请求必须发送 `Authorization: Bearer <token>`，复用会话令牌与单例锁；不使用 `host.authenticate` 握手。
 - `Content-Type: application/json`（可带 charset）；请求体是一个完整 JSON-RPC 对象，可格式化换行，不是 NDJSON。
 - 请求体上限 8 MiB，检查 Content-Length，并对实际读取施加上限（包括 chunked 请求）。

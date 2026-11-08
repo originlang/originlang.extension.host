@@ -197,5 +197,61 @@ class Versions(unittest.TestCase):
         self.assertEqual(versions["abiVersion"], 1)
 
 
+class LocalPackaging(unittest.TestCase):
+    """Local `cargo build` layouts must package without a hand-written --target."""
+
+    target = "aarch64-apple-darwin"
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory(prefix="ol-host-local-test-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+
+    def build(self, relative: str) -> Path:
+        binary = self.root / relative
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        binary.write_bytes(b"binary\n")
+        return binary
+
+    def test_explicit_target_directory_wins(self) -> None:
+        triple = self.build(f"target/{self.target}/release/ol-host")
+        self.build("target/release/ol-host")
+        self.assertEqual(
+            packaging.resolve_binary(self.root, self.target, explicit=None, host=self.target),
+            triple,
+        )
+
+    def test_plain_cargo_build_is_accepted_for_the_host_target(self) -> None:
+        plain = self.build("target/release/ol-host")
+        self.assertEqual(
+            packaging.resolve_binary(self.root, self.target, explicit=None, host=self.target),
+            plain,
+        )
+
+    def test_host_binary_is_never_labelled_as_a_foreign_target(self) -> None:
+        self.build("target/release/ol-host")
+        with self.assertRaisesRegex(SystemExit, "missing binary"):
+            packaging.resolve_binary(
+                self.root, "x86_64-unknown-linux-gnu", explicit=None, host=self.target
+            )
+
+    def test_missing_binary_suggests_building_it(self) -> None:
+        with self.assertRaisesRegex(SystemExit, "--build"):
+            packaging.resolve_binary(self.root, self.target, explicit=None, host=self.target)
+
+    def test_explicit_binary_must_exist(self) -> None:
+        with self.assertRaisesRegex(SystemExit, "missing binary"):
+            packaging.resolve_binary(
+                self.root, self.target, explicit="target/nope/ol-host", host=self.target
+            )
+
+    def test_host_target_comes_from_the_compiler(self) -> None:
+        detected = packaging.host_target(required=False)
+        if detected is None:  # no rustc on this machine
+            self.skipTest("rustc not available")
+        self.assertGreaterEqual(detected.count("-"), 2)
+        self.assertTrue(packaging.entry_name(detected).startswith("ol-host"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

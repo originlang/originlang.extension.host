@@ -34,5 +34,13 @@ jobs:
       # Runtime tests require an actual sandbox binary next to target/debug.
       - name: Build binaries for process integration tests
         run: cargo build --locked --workspace --bins
+      - name: Smoke test the host service entry
+        run: |
+          $suffix = if ($IsWindows) { '.exe' } else { '' }
+          $binary = "target/debug/ol-host$suffix"
+          if (-not (Test-Path -LiteralPath $binary)) { throw 'The ol-host service entry was not built' }
+          $version = & $binary --version
+          if ($LASTEXITCODE -ne 0) { throw 'ol-host --version failed' }
+          Write-Host "ol-host $version"
       - name: Unit, integration and documentation tests
         run: cargo test --locked --workspace

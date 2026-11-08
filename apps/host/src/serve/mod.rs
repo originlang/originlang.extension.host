@@ -67,7 +67,8 @@ pub fn serve(settings: &Settings) -> Result<(), ServeError> {
 
 fn serve_stdio(settings: &Settings) -> Result<(), ServeError> {
     let host = provider::open(settings).map_err(ServeError::Failure)?;
-    host.startup().map_err(|error| ServeError::Failure(error.to_string()))?;
+    host.startup()
+        .map_err(|error| ServeError::Failure(error.to_string()))?;
 
     eprintln!(
         "ol-host {} serving JSON-RPC on stdio (runtime: {})",
@@ -213,6 +214,9 @@ fn serve_network(settings: &Settings, http: bool) -> Result<(), ServeError> {
     }
 
     eprintln!("listening on {advertised}:{}", address.port());
+    if let Some(warning) = non_loopback_warning(address.ip()) {
+        eprintln!("{warning}");
+    }
     eprintln!("pairing token: {token}");
     if http {
         eprintln!("HTTP POST /rpc requires Authorization: Bearer <token>");
@@ -369,6 +373,18 @@ fn handle_connection(
             return Ok(());
         }
     }
+}
+
+/// §6: binding a non-loopback address is allowed but must be visible. The
+/// transport is authenticated, never encrypted, so the operator has to know the
+/// pairing token now crosses the network in clear text.
+fn non_loopback_warning(address: std::net::IpAddr) -> Option<String> {
+    (!address.is_loopback()).then(|| {
+        format!(
+            "warning: bound to a non-loopback address ({address}); traffic is authenticated but \
+             not encrypted, and there is no TLS support"
+        )
+    })
 }
 
 /// Performs the `host.hello` negotiation, returning the hello payload on success
@@ -531,6 +547,16 @@ mod tests {
     }
 
     #[test]
+    fn non_loopback_bindings_are_flagged() {
+        assert!(non_loopback_warning("127.0.0.1".parse().unwrap()).is_none());
+        assert!(non_loopback_warning("::1".parse().unwrap()).is_none());
+        let warning = non_loopback_warning("0.0.0.0".parse().unwrap()).expect("warning");
+        assert!(warning.contains("non-loopback"), "{warning}");
+        assert!(warning.contains("not encrypted"), "{warning}");
+        assert!(non_loopback_warning("192.168.1.10".parse().unwrap()).is_some());
+    }
+
+    #[test]
     fn handshake_accepts_matching_major_and_rejects_mismatch() {
         let dir = std::env::temp_dir().join(format!("ol-host-handshake-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -546,7 +572,10 @@ mod tests {
 
         let bad = handshake(&host, &Some(json!({ "protocolVersion": "2" }))).unwrap_err();
         assert_eq!(bad.code, code::INCOMPATIBLE_PROTOCOL);
-        assert_eq!(bad.data.as_ref().unwrap()["reason"], "incompatible_protocol");
+        assert_eq!(
+            bad.data.as_ref().unwrap()["reason"],
+            "incompatible_protocol"
+        );
 
         host.shutdown();
         let _ = std::fs::remove_dir_all(&dir);

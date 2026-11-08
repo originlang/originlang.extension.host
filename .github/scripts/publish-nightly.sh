@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Publishes the artifacts that build.yml already verified and smoke-accepted.
+# This script only checks transfer integrity (sha256 sidecars), asset naming and
+# the target commit; it never re-packages, so nightly and stable share one
+# package layout (docs/release-contract.md §9).
 set -euo pipefail
 
 [[ "$GITHUB_REF" == 'refs/heads/feature/dev' ]]

@@ -11,8 +11,8 @@
 //!   wired in without changing this one.
 //! - It is not a process supervisor. Extension code runs in-process; the
 //!   capability check is a host-level gate, not an OS sandbox.
-//! - It exposes no network transport. `oext serve` and library embedders own
-//!   the transport; this crate owns the semantics.
+//! - It exposes no network transport. `ol-host` and library embedders own the
+//!   transport; this crate owns the semantics.
 
 pub mod api;
 pub mod error;

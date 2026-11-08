@@ -24,6 +24,16 @@ always be verified.
 
 The script is dependency-free (stdlib only) and runs on Linux, macOS and
 Windows so stable and nightly builds share one code path.
+
+Local packaging is the same code path, not a parallel one:
+
+    cargo build --locked --release -p originlang-ext-host-bin
+    python3 .github/scripts/package_release.py --build --verify
+
+With no `--target` the host triple is read from `rustc -vV`, so the resulting
+package is always labelled with the platform it was actually built for. A plain
+`cargo build --release` (binary in `target/release/`) and a cross build
+(binary in `target/<triple>/release/`) are both accepted.
 """
 from __future__ import annotations
 
@@ -33,6 +43,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tarfile
 import tomllib
@@ -42,6 +53,9 @@ from pathlib import Path
 SCHEMA_VERSION = 2
 PACKAGE_NAME = "oext"
 ENTRY_STEM = "ol-host"
+# Cargo package that produces `bin/ol-host`; `--build` uses the same selection
+# as CI so a local package cannot be built from a different binary target.
+BIN_PACKAGE = "originlang-ext-host-bin"
 # Metadata these files must never be hashed by `manifest.files`: `manifest.json`
 # is hashed by SHA256SUMS instead, and SHA256SUMS cannot hash itself.
 MANIFEST_FILE = "manifest.json"
@@ -104,6 +118,77 @@ def versions(root: Path) -> dict[str, object]:
 
 def entry_name(target: str) -> str:
     return f"{ENTRY_STEM}.exe" if "windows" in target else ENTRY_STEM
+
+
+def host_target(*, required: bool = True) -> str | None:
+    """The triple of the machine doing the build, read from the compiler.
+
+    Local packaging must work without spelling out the triple, and must not
+    label a host binary as a cross build, so the value comes from the same
+    toolchain that will produce the binary instead of a hardcoded table.
+    """
+    rustc = os.environ.get("RUSTC") or shutil.which("rustc")
+    if not rustc:
+        if not required:
+            return None
+        raise SystemExit(
+            "cannot detect the host target: rustc is not on PATH "
+            "(install the toolchain pinned in rust-toolchain.toml, or pass --target)"
+        )
+    try:
+        probe = subprocess.run([rustc, "-vV"], capture_output=True, text=True, check=True)
+    except (OSError, subprocess.CalledProcessError) as error:
+        if not required:
+            return None
+        raise SystemExit(f"cannot run `{rustc} -vV`: {error}") from error
+    match = re.search(r"^host:\s*(\S+)$", probe.stdout, re.MULTILINE)
+    if not match:
+        if not required:
+            return None
+        raise SystemExit(f"cannot read the host triple from `{rustc} -vV`")
+    return match.group(1)
+
+
+def build_binary(root: Path, target: str, *, explicit_target: bool) -> None:
+    """Build the entry point with the workspace's own locked release profile."""
+    cargo = os.environ.get("CARGO") or shutil.which("cargo")
+    if not cargo:
+        raise SystemExit("--build needs cargo on PATH (or CARGO set)")
+    command = [cargo, "build", "--locked", "--release", "-p", BIN_PACKAGE]
+    if explicit_target:
+        command.extend(["--target", target])
+    print("build     " + " ".join(command))
+    completed = subprocess.run(command, cwd=root)
+    if completed.returncode != 0:
+        raise SystemExit(f"cargo build failed with exit code {completed.returncode}")
+
+
+def resolve_binary(root: Path, target: str, *, explicit: str | None,
+                   host: str | None) -> Path:
+    """Find the built entry point.
+
+    Accepts `target/<triple>/release/` (cross or explicit `--target`) and
+    `target/release/` (plain `cargo build --release` on the host). A host
+    binary is never accepted for a different triple: that would mislabel the
+    package.
+    """
+    if explicit:
+        given = Path(explicit)
+        binary = given if given.is_absolute() or given.is_file() else root / given
+        if not binary.is_file():
+            raise SystemExit(f"missing binary: {binary}")
+        return binary
+    candidates = [root / "target" / target / "release" / entry_name(target)]
+    if host is not None and target == host:
+        candidates.append(root / "target" / "release" / entry_name(target))
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    tried = ", ".join(str(path.relative_to(root)) for path in candidates)
+    raise SystemExit(
+        f"missing binary ({tried}); build it first, e.g. "
+        f"`cargo build --locked --release -p {BIN_PACKAGE}`, or pass --build"
+    )
 
 
 def package_version(version: str, channel: str, *, release_tag: str = "",
@@ -257,12 +342,28 @@ def write_sidecar(archive: Path) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--target", required=True, help="Rust target triple")
+    parser = argparse.ArgumentParser(
+        description=__doc__.splitlines()[0],
+        epilog="With no arguments this packages the host platform: "
+               "python3 .github/scripts/package_release.py --build --verify",
+    )
+    parser.add_argument(
+        "--target",
+        help="Rust target triple (default: detected from rustc, so a plain "
+             "`cargo build --release` is packaged as the host platform)",
+    )
     parser.add_argument("--channel", choices=("stable", "nightly"), default="stable")
     parser.add_argument("--dist", default="dist", help="output directory (default: dist)")
     parser.add_argument("--stage-root", default="target/package", help="staging parent")
     parser.add_argument("--binary", help="path to the built ol-host binary")
+    parser.add_argument(
+        "--build", action="store_true",
+        help=f"run `cargo build --locked --release -p {BIN_PACKAGE}` before packaging",
+    )
+    parser.add_argument(
+        "--verify", action="store_true",
+        help="verify the archive and smoke-accept it (same scripts CI runs)",
+    )
     parser.add_argument(
         "--sandbox-binary",
         help="path to a built oext-sandbox; omit it to ship a package with sandbox: null",
@@ -277,16 +378,31 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     root = repo_root()
+
+    def from_root(path: str) -> Path:
+        """Relative paths are resolved against the repository, not the shell's
+        cwd, so packaging behaves the same from any directory."""
+        candidate = Path(path)
+        return candidate if candidate.is_absolute() else root / candidate
+
+    explicit_target = args.target is not None
+    if explicit_target:
+        target = args.target
+        host = host_target(required=False)
+    else:
+        target = host = host_target()
+
     host_version = workspace_version(root)
     version = package_version(
         host_version, args.channel, release_tag=args.release_tag,
         commit=args.commit, run_id=args.run_id,
     )
-    binary = Path(args.binary or f"target/{args.target}/release/{entry_name(args.target)}")
-    if not binary.is_file():
-        raise SystemExit(f"missing binary: {binary}")
 
-    stage = Path(args.stage_root) / f"{PACKAGE_NAME}-{version}-{args.target}"
+    if args.build:
+        build_binary(root, target, explicit_target=explicit_target)
+    binary = resolve_binary(root, target, explicit=args.binary, host=host)
+
+    stage = from_root(args.stage_root) / f"{PACKAGE_NAME}-{version}-{target}"
     build_info = None
     if args.channel == "nightly":
         build_info = {
@@ -295,7 +411,7 @@ def main(argv: list[str] | None = None) -> int:
             "packageVersion": version,
             "commit": args.commit,
             "runId": args.run_id,
-            "target": args.target,
+            "target": target,
         }
         for pair in args.build_info_extra:
             key, _, value = pair.partition("=")
@@ -303,17 +419,33 @@ def main(argv: list[str] | None = None) -> int:
                 raise SystemExit(f"malformed --build-info-extra {pair!r}")
             build_info[key] = value
     manifest = stage_package(
-        root, stage, target=args.target, channel=args.channel, version=version,
+        root, stage, target=target, channel=args.channel, version=version,
         host_version=host_version, binary=binary, build_info=build_info,
-        sandbox_binary=Path(args.sandbox_binary) if args.sandbox_binary else None,
+        sandbox_binary=from_root(args.sandbox_binary) if args.sandbox_binary else None,
     )
-    archive = create_archive(stage, Path(args.dist), args.target)
+    archive = create_archive(stage, from_root(args.dist), target)
     sidecar = write_sidecar(archive)
 
-    print(f"package   {archive}")
-    print(f"entry     bin/{manifest['entry']}")
-    print(f"files     {len(manifest['files'])}")
-    print(f"sha256    {sidecar.read_text(encoding='utf-8').split()[0]}")
+    # Flush before handing over to the verify scripts, which write directly to
+    # the inherited stdout: the package summary must not appear below them.
+    print(
+        "\n".join((
+            f"target    {target}",
+            f"package   {archive}",
+            f"entry     bin/{manifest['entry']}",
+            f"files     {len(manifest['files'])}",
+            f"sha256    {sidecar.read_text(encoding='utf-8').split()[0]}",
+        )),
+        flush=True,
+    )
+
+    if args.verify:
+        scripts = Path(__file__).resolve().parent
+        for script in ("verify_package.py", "smoke_host.py"):
+            completed = subprocess.run([sys.executable, str(scripts / script), str(archive)])
+            if completed.returncode != 0:
+                print(f"FAIL {script} rejected {archive.name}", file=sys.stderr)
+                return completed.returncode
     return 0
 
 

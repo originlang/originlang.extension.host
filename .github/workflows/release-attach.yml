@@ -1,3 +1,5 @@
+# 正式版发布只做传输完整性检查（sha256 侧车 + 资产计数）：包的校验链与冒烟验收
+# 已在 build.yml 内对同一批产物完成，nightly 走同一 job，两个渠道的包结构一致。
 name: Release attach
 on:
   workflow_call:

@@ -2,18 +2,18 @@
 
 以 Rust 实现的扩展宿主平台：负责扩展的**安装、授权、隔离执行、状态持久化、定时任务与事件分发**，并可经 JSON-RPC 对外提供服务。
 
-本仓库当前包含**库与两个执行体的源码**：宿主是 `originlang-ext-host` crate；服务入口是 `oext-host` 可执行文件（`apps/host`），执行侧是 `oext-sandbox` 可执行文件（`apps/sandbox`）。`oext-host` 是独立交付的服务进程，可自行启动、握手、执行请求并退出，不依赖 `bootidea.cli`；CLI 与 HomeWorld 通过版本化协议连接它（见 [docs/service-contract.md](docs/service-contract.md) 与 [docs/release-contract.md](docs/release-contract.md)）。
+本仓库当前包含**库与两个执行体的源码**：宿主是 `originlang-ext-host` crate；服务入口是 `ol-host` 可执行文件（`apps/host`，2026-11-08 由 `oext-host` 更名），执行侧是 `oext-sandbox` 可执行文件（`apps/sandbox`）。`ol-host` 是独立交付的服务进程，可自行启动、握手、执行请求并退出，不依赖 `bootidea.cli`；CLI 与 HomeWorld 通过版本化协议连接它（见 [docs/service-contract.md](docs/service-contract.md) 与 [docs/release-contract.md](docs/release-contract.md)）。
 
-当前优先交付 `bin/oext-host`（Windows 为 `bin/oext-host.exe`）；`oext-sandbox` 是否由本仓库交付待定，不作为当前 Host 交付的前置条件。消费者不得假定发布包附带沙箱，应按发布清单与运行期握手确认。
+当前优先交付 `bin/ol-host`（Windows 为 `bin/ol-host.exe`）；`oext-sandbox` 是否由本仓库交付待定，不作为当前 Host 交付的前置条件，发布包默认不含沙箱。消费者不得假定发布包附带沙箱，应按发布清单（`sandbox` 字段）与运行期握手确认。
 
-当前版本 `0.1.0`，提供三个执行后端：默认的**进程外沙箱**（每实例一个 `oext-sandbox` 进程）、**进程内 QuickJS 工作线程**，以及给一等方插件用的**动态库**。`oext-host` 默认按清单里的 `runtime` 字段逐个路由，一份进程里可以同时跑脚本插件与原生插件；取舍见 [docs/backends.md](docs/backends.md)。
+当前版本 `0.1.0`，提供三个执行后端：**进程外沙箱**（每实例一个 `oext-sandbox` 进程，需单独具备该执行体）、**进程内 QuickJS 工作线程**，以及给一等方插件用的**动态库**。`ol-host` 默认按清单里的 `runtime` 字段逐个路由，一份进程里可以同时跑脚本插件与原生插件；取舍见 [docs/backends.md](docs/backends.md)。
 
 ## 特性
 
 | 能力 | 现状 |
 | --- | --- |
 | 扩展格式 | `extension.json` + `main.js`（或 `runtime: dylib` 时的 `main.dll`），安装时校验并记录 SHA-256 |
-| 执行隔离 | 默认每扩展独立进程（Job Object / PDEATHSIG 收尸），可切回进程内线程；堆/栈/墙钟上限按清单配置。`dylib` 后端不隔离，仅限一等方插件 |
+| 执行隔离 | 沙箱后端下每扩展独立进程（Job Object / PDEATHSIG 收尸），可切回进程内线程；堆/栈/墙钟上限按清单配置。发布包默认不含沙箱执行体，此时 `host.hello` 报告 `sandbox: null`，宿主不声称进程隔离 |
 | 授权模型 | 清单声明能力，运维显式授予；加载与每次调用双重校验，裁决永远在父进程 |
 | 状态存储 | 按扩展 id 命名空间隔离，文件后端，原子写入 |
 | 定时任务 | 一次性/重复任务，归属扩展卸载时自动取消 |
@@ -46,21 +46,57 @@ printf '%s\n' \
   '{"jsonrpc":"2.0","id":3,"method":"host.shutdown"}' | bootidea serve
 ```
 
-### 独立服务入口（oext-host）
+### 独立服务入口（ol-host）
 
-`oext-host` 不依赖 CLI，可独立下载、启动、握手、执行请求并正常退出。首个业务调用必须是 `host.hello` 完成协议协商：
+`ol-host` 不依赖 CLI，可独立下载、启动、握手、执行请求并正常退出；它是唯一正式服务入口（原名 `oext-host`，迁移见 [docs/service-contract.md](docs/service-contract.md) 第 1.2 节）。首个业务调用必须是 `host.hello` 完成协议协商：
 
 ```sh
-cargo build --release -p originlang-ext-host-bin -p originlang-ext-sandbox
+cargo build --release -p originlang-ext-host-bin
 
 # stdio：握手 → 查询 → EOF 正常退出（退出码 0）
 printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"host.hello","params":{"protocolVersion":"1"}}' \
   '{"jsonrpc":"2.0","id":2,"method":"host.info"}' \
-  | ./target/release/oext-host --transport stdio --home "$PWD/tmp/home"
+  | ./target/release/ol-host --transport stdio --home "$PWD/tmp/home"
 ```
 
 协议主版本不兼容时返回 `-32023` 并关闭连接；`--version` 打印一行版本并退出 `0`；同根目录第二个实例退出 `3`。完整约定见 [docs/service-contract.md](docs/service-contract.md)，发布包结构与校验见 [docs/release-contract.md](docs/release-contract.md)。
+
+### 打包与验收
+
+发布包由脚本生成，不要手写清单或校验和。**cargo 只负责构建，打包/校验/冒烟跑同一套脚本**；本机一条命令即可完成全流程：
+
+```sh
+# 构建（--locked --release，本地目标）→ 打包 → 校验收链 → 从解压包冒烟验收
+python3 .github/scripts/package_release.py --build --verify --dist dist
+```
+
+`--target` 省略时从 `rustc -vV` 读取本机三元组，包名与清单 `target` 因此总是与实际构建平台一致；`target/release/ol-host`（普通 `cargo build --release`）和 `target/<triple>/release/ol-host`（交叉或显式 `--target` 构建）两种布局都能识别，且不会把本机二进制标成别的平台。分步执行等价于：
+
+```sh
+cargo build --locked --release -p originlang-ext-host-bin
+
+# 1. 打包：bin/ol-host + manifest.json + SHA256SUMS + docs + examples，并写出 <archive>.sha256
+python3 .github/scripts/package_release.py --channel stable --dist dist
+
+# 2. 校验收链（归档哈希 → SHA256SUMS → manifest.files）
+python3 .github/scripts/verify_package.py dist/oext-0.1.0-$(rustc -vV | sed -n 's/^host: //p').tar.gz
+
+# 3. 从解压后的包做冒烟验收：--version、host.hello、host.info、stdio EOF、stdout 纯净性
+python3 .github/scripts/smoke_host.py dist/oext-0.1.0-$(rustc -vV | sed -n 's/^host: //p').tar.gz
+
+# 4. 校验链自身的单元测试（无需构建、无需网络）
+python3 .github/scripts/test_package.py
+```
+
+交叉构建时显式给出三元组（此时不会再回退到 `target/release/`）：
+
+```sh
+cargo build --locked --release --target x86_64-unknown-linux-gnu -p originlang-ext-host-bin
+python3 .github/scripts/package_release.py --target x86_64-unknown-linux-gnu --dist dist
+```
+
+包内不含 `oext-sandbox`，清单写明 `sandbox: null`；因此 `--backend sandbox` 会在启动时失败并说明原因，而不是静默退化成进程内执行。需要进程外沙箱时单独获取沙箱执行体，并用 `OEXT_SANDBOX_BIN` 或其同目录位置指给宿主。
 
 `bootidea run` / `bootidea serve` 默认使用进程外沙箱，需要 `oext-sandbox` 在 `PATH` 上（或用 `OEXT_SANDBOX_BIN` 指定完整路径）。调试时可用 `--backend quickjs` 回到同进程执行：
 
@@ -71,15 +107,15 @@ bootidea --backend quickjs run ./demo --method hello
 TCP 方式：
 
 ```sh
-bootidea serve --transport tcp --port 7311
-# 输出 pairing token，客户端首个请求必须是 host.authenticate
+ol-host --transport tcp --port 7311
+# 输出 pairing token（stderr）与实际端口，客户端首个请求必须是 host.authenticate
 ```
 
 HTTP 方式（`std` 是 `stdio` 的别名）：
 
 ```sh
-bootidea serve --transport http --port 7311
-# 从启动日志或 host.json 获取 token
+ol-host --transport http --port 7311
+# 从启动日志或 <root>/run/host.json 获取 token
 curl http://127.0.0.1:7311/rpc \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
@@ -128,12 +164,12 @@ crates/plugin-abi        宿主与插件共用的 C ABI、信封与 panic 守卫
 crates/signing           Ed25519 包签名、密钥文件、发布者信任库
 crates/host              注册表、生命周期、Host API、事件、定时器
 apps/sandbox             oext-sandbox：只链接 protocol/runtime/quickjs 的执行体
-apps/host                oext-host：独立服务入口，承载传输与协议协商
+apps/host                ol-host：独立服务入口，承载传输与协议协商
 examples                 hello / timers / notes
 docs                     架构、协议、后端、安全、服务契约、发布契约
 ```
 
-`oext-host` 是独立交付的服务进程，不依赖 `bootidea.cli`；CLI 以 git 依赖（锁定到具体 rev）链接本仓库的 crate，装配后端并实现全部子命令，同时在迁移期作为 `oext-host` 的协议客户端。库的契约在这里演进，入口的适配在那里演进，两者独立发版。
+`ol-host` 是独立交付的服务进程，不依赖 `bootidea.cli`；CLI 以 git 依赖（锁定到具体 rev）链接本仓库的 crate，装配后端并实现全部子命令，同时在迁移期作为 `ol-host` 的协议客户端。库的契约在这里演进，入口的适配在那里演进，两者独立发版。
 
 ## 能力模型
 
@@ -152,6 +188,24 @@ docs                     架构、协议、后端、安全、服务契约、发�
 
 加载是授权门：声明了但未授予的能力会导致扩展根本无法加载；运行期撤销能力则立即对后续调用生效，无需卸载。
 
+## 交付状态
+
+以 2026-11-08 本地验收为准，区分「已实现」「已本地验证」「待验证/待办」；未跑过的检查不记为完成。
+
+| 事项 | 状态 |
+| --- | --- |
+| `ol-host` 独立入口（`--version`、`--help`、未知参数退出 `2`） | 已实现，本地已验证 |
+| `host.hello`/`host.info`、`-32023` 版本拒绝、stdio EOF 退出 `0` | 已实现，本地已验证 |
+| 按根目录单例（第二实例退出 `3`）、`0600` 发现文件、退出后清理 `run/` | 已实现，本地已验证 |
+| TCP 令牌鉴权、`401`/`-32020`、非回环绑定风险提示 | 已实现，本地已验证 |
+| 打包链（`manifest.json` + `SHA256SUMS` + `<archive>.sha256`，无环依赖） | 已实现，本地已验证（含 27 项脚本自测） |
+| 本机一条命令打包（`--build --verify`，自动识别 host 三元组与 cargo 产物目录） | 已实现，本地已验证（`target/release` 与 `target/<triple>/release` 两种布局） |
+| 从解压包冒烟（macOS `aarch64-apple-darwin`） | 已验证 |
+| Windows x64 / Linux x64 的构建、打包与冒烟 | 已接入 CI，**未在本地执行**（无对应平台与 Docker），待 CI 首跑确认 |
+| 正式发布（打 tag、GitHub Release） | **未执行**：本次不创建标签、不推送、不发版 |
+| `oext-sandbox` 是否纳入发布包 | 待定；当前清单固定 `sandbox: null` |
+| 关闭优雅期（5 秒）与关闭中 `-32022`、通配绑定的发现地址 | 待办（见服务契约第 12 节 M-05、M-10） |
+
 ## 文档
 
 - [架构与设计决策](docs/architecture.md)
@@ -162,6 +216,7 @@ docs                     架构、协议、后端、安全、服务契约、发�
 
 ## 已知边界
 
+- 发布包默认不含沙箱执行体：`--backend auto` 只启用 `quickjs`/`dylib`，`host.hello` 报告 `sandbox: null`，此时**没有进程隔离**。
 - 沙箱进程与宿主**同一用户**：能读该用户可读的一切。要收紧需受限令牌 / AppContainer / seccomp，见安全文档。`--backend quickjs` 会退回同进程，此时引擎缺陷等同宿主缺陷。
 - 无 CPU 配额计量，只有墙钟超时（引擎中断 + 父进程杀进程兜底）；无文件与网络能力（方向见安全文档）。
 - 定时器不持久化，重启后不恢复；事件投递在实例繁忙时跳过并记日志，不排队。
@@ -182,11 +237,11 @@ cargo test --workspace
 | 文件 | 职责 |
 | --- | --- |
 | `.github/workflows/pipeline.yml` | 分支推送、PR 和手动 CI（含 feature/dev 的 nightly 编排） |
-| `.github/workflows/quality.yml` | 格式、Clippy、全仓版本一致性与标签校验 |
-| `.github/workflows/test.yml` | Windows / Linux 全部测试 |
-| `.github/workflows/build.yml` | Release 构建、沙箱冒烟测试、打包和 SHA-256 |
+| `.github/workflows/quality.yml` | 格式、Clippy、全仓版本一致性、标签校验与打包脚本自测（`test_package.py`） |
+| `.github/workflows/test.yml` | Windows / Linux 全部测试（先构建二进制并冒烟 `ol-host --version`） |
+| `.github/workflows/build.yml` | Release 构建、`ol-host` 入口冒烟、打包、从解压包做校验与冒烟验收 |
 | `.github/workflows/release.yml` | push `vX.Y.Z` 标签时编排 quality → test → build → 创建 Release |
-| `.github/workflows/release-attach.yml` | 将已校验产物创建为 GitHub Release 并上传 |
+| `.github/workflows/release-attach.yml` | 校验传输完整性（sha256 + 资产计数）后创建 GitHub Release 并上传 |
 | `.github/workflows/nightly.yml` | feature/dev 检查、测试和打包通过后发布 nightly 预发布 |
 
 ### 发布流程
@@ -221,5 +276,7 @@ workspace 根通过 `[workspace.package].version` 声明统一版本，全部成
 无需任何额外 secret 或 token 配置。发布用 `gh release create`（`GITHUB_TOKEN`）即可，因为它直接在 tag 触发的同一工作流内完成，不依赖「tag 触发下游工作流」的能力。
 
 工具链由 `rust-toolchain.toml` 指定，Cargo 使用 `--locked`，需提交 Cargo.lock。
-现有打包脚本生成 Windows x64 ZIP、Linux x64 tar.gz 和 SHA-256，仍沿用仅打包沙箱的旧布局，尚未满足当前 Host 交付要求。下一步须优先改为交付 `bin/oext-host` 及发布契约规定的元数据、文档与示例；`oext-sandbox` 是否由本仓库交付待定。内部 Rust 库不作为包内执行体；通用用户 CLI 由 `bootidea.cli` 独立发布。Linux 包在 Ubuntu 24.04 构建，需要兼容的 glibc；未提供 musl 包。
-普通 CI 产物保留 14 天，发行产物保存到 GitHub Release。
+
+打包只走一个脚本（`.github/scripts/package_release.py`），正式版与 nightly 共用：包内为 `bin/ol-host`、`manifest.json`、`SHA256SUMS`、`docs/`、`examples/`（nightly 另加 `build-info.json`），Windows 出 ZIP、Linux 出 tar.gz，并旁挂 `<archive>.sha256`。本包不含 `oext-sandbox`，清单写 `sandbox: null`；沙箱源码仍在本仓库，是否纳入交付待定。内部 Rust 库不作为包内执行体；通用用户 CLI 由 `bootidea.cli` 独立发布。Linux 包在 Ubuntu 24.04 构建，需要兼容的 glibc；未提供 musl 包。
+
+打包后立即从归档解压执行验收（`verify_package.py` + `smoke_host.py`），未通过则该平台不产出可用产物；发布阶段只做传输完整性检查，不重新打包。普通 CI 产物保留 14 天，发行产物保存到 GitHub Release。

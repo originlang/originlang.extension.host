@@ -10,7 +10,9 @@
 use super::{Outcome, constant_time_eq, dispatch, handshake};
 use crate::config;
 use originlang_ext_host::Host;
-use originlang_ext_protocol::{MAX_MESSAGE_BYTES, Message, RpcError, code, error_response, parse_message, response};
+use originlang_ext_protocol::{
+    MAX_MESSAGE_BYTES, Message, RpcError, code, error_response, parse_message, response,
+};
 use serde_json::Value;
 use std::io::Read;
 use std::net::TcpListener;
@@ -28,11 +30,8 @@ pub(super) fn serve(
     listener
         .set_nonblocking(false)
         .map_err(|error| std::io::Error::other(format!("blocking mode: {error}")))?;
-    let server = Server::from_listener(
-        listener.try_clone().map_err(std::io::Error::other)?,
-        None,
-    )
-    .map_err(|error| std::io::Error::other(error.to_string()))?;
+    let server = Server::from_listener(listener.try_clone().map_err(std::io::Error::other)?, None)
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
     while !stopping.load(Ordering::SeqCst) {
         match server.recv_timeout(Duration::from_millis(50)) {
             Ok(Some(request)) => {
@@ -76,12 +75,7 @@ fn reply(request: Request, status: u16, value: Option<Value>) -> Result<(), std:
     Ok(())
 }
 
-fn reject(
-    request: Request,
-    status: u16,
-    code: i64,
-    message: &str,
-) -> Result<(), std::io::Error> {
+fn reject(request: Request, status: u16, code: i64, message: &str) -> Result<(), std::io::Error> {
     reply(
         request,
         status,
@@ -110,7 +104,12 @@ fn handle(
                     && constant_time_eq(supplied.as_bytes(), token.as_bytes())
             });
     if !authenticated {
-        return reject(request, 401, code::UNAUTHORIZED, "missing or invalid bearer token");
+        return reject(
+            request,
+            401,
+            code::UNAUTHORIZED,
+            "missing or invalid bearer token",
+        );
     }
     if request.url() != "/rpc" {
         return reject(request, 404, code::INVALID_REQUEST, "use /rpc");
@@ -152,7 +151,12 @@ fn handle(
         id, method, params, ..
     } = message
     else {
-        return reject(request, 400, code::INVALID_REQUEST, "expected a request or notification");
+        return reject(
+            request,
+            400,
+            code::INVALID_REQUEST,
+            "expected a request or notification",
+        );
     };
     if stopping.load(Ordering::SeqCst) {
         return reject(request, 503, code::REJECTED, "host is stopping");

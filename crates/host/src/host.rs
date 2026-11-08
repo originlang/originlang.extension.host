@@ -50,7 +50,8 @@ pub struct SandboxInfo {
 /// Public snapshot of one extension, returned by list/load/install.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ExtensionSummary {    /// Stable identity.
+pub struct ExtensionSummary {
+    /// Stable identity.
     pub id: String,
     /// Display name.
     pub name: String,
@@ -940,10 +941,7 @@ impl Host {
             "protocolVersion".to_owned(),
             Value::String(PROTOCOL_VERSION.to_owned()),
         );
-        object.insert(
-            "abiVersion".to_owned(),
-            Value::Number(ABI_VERSION.into()),
-        );
+        object.insert("abiVersion".to_owned(), Value::Number(ABI_VERSION.into()));
         object.insert(
             "sandbox".to_owned(),
             sandbox

@@ -12,3 +12,7 @@
 
 # CI release archives
 /dist
+
+# Python 缓存（打包/校验脚本）
+__pycache__/
+*.pyc

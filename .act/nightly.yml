@@ -1,14 +1,15 @@
 name: Nightly
 
-# originlang.extension.host 的本地夜间构建：编译 workspace 二进制 → 沙箱冒烟 →
-# 打包 tar.gz（含 README/CHANGELOG/docs/examples）+ sha256。
-# 产物只写到本仓库 dist/nightly/<stamp>/，不上传任何远端。
+# originlang.extension.host 的本地夜间构建：编译 workspace 二进制 → 宿主入口冒烟 →
+# 用与正式版相同的脚本打包（bin/ol-host + manifest.json + SHA256SUMS + docs + examples）
+# → 从解压后的发布包验收。产物只写到本仓库 dist/nightly/<stamp>/，不上传任何远端。
 #
 # 运行（在本仓库根目录）：
 #   act -W .act/nightly.yml
 #
-# 版本取 version.txt（工作区统一版本源）；nightly 段用短 SHA 唯一标识，
-# 与上游 .github/scripts/package.ps1 的 "run_id.sha8" 命名不同——本地无 GITHUB_RUN_ID。
+# 版本取 workspace Cargo.toml / version.txt；nightly 段用短 SHA 唯一标识，
+# 与 .github/scripts/package_release.py 的 "run_id.sha8" 命名一致——本地无
+# GITHUB_RUN_ID，用 UTC 秒数充当 run id。
 
 on:
   push:
@@ -42,22 +43,31 @@ jobs:
 
           base="$(tr -d '\r\n' < "$work/version.txt")"
           [ -n "$base" ] || { echo 'version.txt 为空' >&2; exit 1; }
-          sha="$(git -C "$src" rev-parse --short=7 HEAD)"
+          sha="$(git -C "$src" rev-parse HEAD)"
           day="$(date -u +%Y%m%d)"
           stamp="nightly.${day}.$(date -u +%H%M)"
-          pkg="${base}-nightly.${day}.${sha}"
+          run_id="$(date -u +%s)"
           out="$src/dist/nightly/$stamp"
           mkdir -p "$out"
           {
             echo "base=$base"
-            echo "pkg=$pkg"
             echo "sha=$sha"
             echo "stamp=$stamp"
+            echo "run_id=$run_id"
             echo "branch=$(git -C "$src" rev-parse --abbrev-ref HEAD)"
             echo "dirty=$(git -C "$src" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
             echo "out=$out"
           } >> "$GITHUB_OUTPUT"
-          printf '版本 %s（HEAD %s）\n' "$pkg" "$sha"
+          printf '版本 %s（HEAD %s）\n' "$base" "$sha"
+
+      - name: 安装打包所需的 Python
+        run: |
+          set -euo pipefail
+          if ! command -v python3 >/dev/null; then
+            apt-get update
+            apt-get install -y --no-install-recommends python3
+          fi
+          python3 --version
 
       - name: 构建 release 二进制
         run: |
@@ -65,7 +75,7 @@ jobs:
           cd /work/extension.host
           cargo build --locked --release --workspace --bins
 
-      - name: 沙箱冒烟
+      - name: 沙箱冒烟（沙箱源码仍在本仓库，但不随 Host 包交付）
         run: |
           set -euo pipefail
           cd /work/extension.host
@@ -74,52 +84,44 @@ jobs:
           ./target/release/oext-sandbox </dev/null
           printf 'oext-sandbox 启动检查通过\n'
 
-      - name: Host 冒烟
+      - name: Host 入口冒烟
         run: |
           set -euo pipefail
           cd /work/extension.host
-          test -x target/release/oext-host
-          # 独立入口最小检查：--version 打印一行并退出 0。
-          ./target/release/oext-host --version
-          printf 'oext-host 启动检查通过\n'
+          test -x target/release/ol-host
+          ./target/release/ol-host --version
+          printf 'ol-host 启动检查通过\n'
 
-      - name: 打包与校验和
+      - name: 打包（与正式版同一脚本）
         env:
-          PKG: ${{ steps.src.outputs.pkg }}
-          BASE: ${{ steps.src.outputs.base }}
           SHA: ${{ steps.src.outputs.sha }}
-          STAMP: ${{ steps.src.outputs.stamp }}
+          RUN_ID: ${{ steps.src.outputs.run_id }}
           BRANCH: ${{ steps.src.outputs.branch }}
           DIRTY: ${{ steps.src.outputs.dirty }}
           OUT: ${{ steps.src.outputs.out }}
         run: |
           set -euo pipefail
-          target=x86_64-unknown-linux-gnu
-          name="oext-${PKG}-${target}"
-          stage="/work/stage/$name"
-          rm -rf /work/stage
-          mkdir -p "$stage" "$OUT"
           cd /work/extension.host
-          install -m 0755 target/release/oext-sandbox "$stage/oext-sandbox"
-          install -m 0755 target/release/oext-host "$stage/oext-host"
-          cp README.md CHANGELOG.md "$stage/"
-          cp -R docs examples "$stage/"
-          cat > "$stage/build-info.json" <<EOF
-          {
-            "channel": "nightly",
-            "repo": "originlang.extension.host",
-            "version": "${BASE}",
-            "packageVersion": "${PKG}",
-            "commit": "${SHA}",
-            "branch": "${BRANCH}",
-            "dirtyFiles": ${DIRTY},
-            "target": "${target}",
-            "builtAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          }
-          EOF
-          tar -czf "$OUT/$name.tar.gz" -C /work/stage "$name"
-          cd "$OUT"
-          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
-          printf '%s\n' "$PKG" > VERSION
-          cat "$name.tar.gz.sha256"
+          python3 .github/scripts/package_release.py \
+            --target x86_64-unknown-linux-gnu \
+            --channel nightly \
+            --binary target/release/ol-host \
+            --commit "$SHA" \
+            --run-id "$RUN_ID" \
+            --dist "$OUT" \
+            --build-info-extra "repo=originlang.extension.host" \
+            --build-info-extra "branch=$BRANCH" \
+            --build-info-extra "dirtyFiles=$DIRTY"
+
+      - name: 从发布包验收（解压后执行）
+        env:
+          OUT: ${{ steps.src.outputs.out }}
+        run: |
+          set -euo pipefail
+          cd /work/extension.host
+          shopt -s nullglob
+          archives=("$OUT"/*.tar.gz "$OUT"/*.zip)
+          [ ${#archives[@]} -eq 1 ] || { echo "期望一个发布包，实际 ${#archives[@]}" >&2; exit 1; }
+          python3 .github/scripts/verify_package.py "${archives[0]}"
+          python3 .github/scripts/smoke_host.py "${archives[0]}"
           printf '产物目录：%s\n' "$OUT"

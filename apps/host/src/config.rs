@@ -190,10 +190,7 @@ pub fn load(args: &Args) -> Result<Settings, String> {
     };
 
     // host: --host > default 127.0.0.1 (no env/config).
-    let host = args
-        .host
-        .clone()
-        .unwrap_or_else(|| "127.0.0.1".to_owned());
+    let host = args.host.clone().unwrap_or_else(|| "127.0.0.1".to_owned());
 
     // port: --port > default 0 (no env/config).
     let port = match args.port.as_deref() {
@@ -253,17 +250,20 @@ pub fn load(args: &Args) -> Result<Settings, String> {
 /// Loads the TOML config file; an explicit path must exist, the default is
 /// optional. Unknown keys are rejected (deny_unknown_fields).
 fn load_config_file(args: &Args) -> Result<ConfigFile, String> {
-    let explicit = args.config.clone().or_else(|| std::env::var_os("OEXT_CONFIG").map(PathBuf::from));
+    let explicit = args
+        .config
+        .clone()
+        .or_else(|| std::env::var_os("OEXT_CONFIG").map(PathBuf::from));
     if let Some(path) = explicit {
         if !path.is_file() {
             return Err(format!("config file not found: {}", path.display()));
         }
         return parse_config(&path);
     }
-    if let Some(path) = default_config_path() {
-        if path.is_file() {
-            return parse_config(&path);
-        }
+    if let Some(path) = default_config_path()
+        && path.is_file()
+    {
+        return parse_config(&path);
     }
     Ok(ConfigFile::default())
 }
@@ -282,8 +282,7 @@ fn default_config_path() -> Option<PathBuf> {
 fn parse_config(path: &Path) -> Result<ConfigFile, String> {
     let body = std::fs::read_to_string(path)
         .map_err(|error| format!("cannot read config {}: {error}", path.display()))?;
-    toml::from_str(&body)
-        .map_err(|error| format!("invalid config {}: {error}", path.display()))
+    toml::from_str(&body).map_err(|error| format!("invalid config {}: {error}", path.display()))
 }
 
 fn env_flag(name: &str) -> bool {

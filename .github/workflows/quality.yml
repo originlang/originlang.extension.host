@@ -32,3 +32,5 @@ jobs:
         run: python .github/scripts/check-release.py
       - name: Test nightly publication guards (mock GitHub)
         run: python .github/scripts/test-nightly.py
+      - name: Test the package and checksum chain
+        run: python .github/scripts/test_package.py
