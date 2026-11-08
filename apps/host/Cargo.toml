@@ -5,10 +5,13 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Independent host service: the oext-host executable that owns the transport and server entry"
+description = "Independent host service: the ol-host executable that owns the transport and server entry"
 
+# The crate keeps its workspace name so dependency paths and Cargo.lock stay
+# stable; only the delivered executable is renamed. `ol-host` is the single
+# official service entry (docs/service-contract.md §1).
 [[bin]]
-name = "oext-host"
+name = "ol-host"
 path = "src/main.rs"
 
 [dependencies]

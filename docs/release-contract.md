@@ -23,16 +23,20 @@
 
 ## 2. 入口与产物
 
+交付范围更新（2026-11-08）：当前优先交付 `bin/oext-host`（Windows 为 `bin/oext-host.exe`）。`oext-sandbox` 是否由本仓库交付待定；下文关于沙箱的布局与校验规则仅在实际包含该执行体时适用，不构成当前交付承诺。
+
+消费者适配：CLI 与 HomeWorld 不得假定 Host 包附带沙箱；须读取清单的 `sandbox` 字段，并以运行期握手结果确认可用性。不含沙箱的包使用 `sandbox: null`，不能据此启用进程外沙箱后端。
+
 | 产物 | 说明 |
 | --- | --- |
 | `oext-host`（Windows `oext-host.exe`） | 独立服务入口，唯一对外服务进程 |
-| `oext-sandbox`（Windows `oext-sandbox.exe`） | 进程外沙箱执行体，由 Host 按服务契约第 3.4 节发现 |
+| `oext-sandbox`（Windows `oext-sandbox.exe`） | 进程外沙箱执行体，是否由本仓库交付待定；可用时由 Host 按服务契约第 3.4 节发现 |
 
 强制规则：
 
 - 服务入口固定为 `oext-host`，消费者不得硬编码其他二进制名称。
 - `oext-sandbox` 是执行体，不是服务入口；消费者不得把它当作 Host 启动，也不得从 `PATH` 猜测它的位置。
-- 发布包是否包含 `oext-sandbox` 必须按真实产物说明；不含沙箱的包须在清单中明确 `sandbox: absent`，Host 此时以 `--backend auto` 跳过沙箱后端。
+- 发布包是否包含 `oext-sandbox` 必须按真实产物说明；不含沙箱的包须在清单中明确 `sandbox: null`，Host 此时以 `--backend auto` 跳过沙箱后端。
 
 ## 3. 包内文件布局
 

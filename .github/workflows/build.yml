@@ -47,21 +47,32 @@ jobs:
         run: rustup show active-toolchain
       - name: Build release binaries
         run: cargo build --locked --release --workspace --bins --target $env:BUILD_TARGET
-      - name: Smoke test the sandbox binary
+      - name: Smoke test the host entry
         run: |
           $suffix = if ($IsWindows) { '.exe' } else { '' }
-          $binary = "./target/$env:BUILD_TARGET/release/oext-sandbox$suffix"
-          if (-not (Test-Path -LiteralPath $binary)) { throw 'Sandbox binary was not built' }
-          # 沙箱没有命令行界面：它在 stdin 关闭时直接退出 0，这正好是不需要
-          # 构造协议帧的最小启动检查。
-          $null | & $binary
-          if ($LASTEXITCODE -ne 0) { throw 'Sandbox smoke test failed' }
-      - name: Package binaries and documentation
-        run: ./.github/scripts/package.ps1 -Target $env:BUILD_TARGET -Channel $env:BUILD_CHANNEL
+          $binary = "./target/$env:BUILD_TARGET/release/ol-host$suffix"
+          if (-not (Test-Path -LiteralPath $binary)) { throw 'The ol-host entry was not built' }
+          $version = & $binary --version
+          if ($LASTEXITCODE -ne 0) { throw 'ol-host --version failed' }
+          if (-not $version) { throw 'ol-host --version printed nothing' }
+          Write-Host "ol-host $version"
+      # 沙箱不随本包交付；沙箱二进制仍会构建，供 workspace 测试与后续独立发布使用。
+      - name: Package the release
+        run: python .github/scripts/package_release.py --target $env:BUILD_TARGET --channel $env:BUILD_CHANNEL --dist dist
+      # 从解压后的发布包验收：校验链、--version、host.hello、host.info、
+      # stdio EOF 清理退出、stdout 只有协议帧、缺沙箱时不虚报后端。
+      - name: Verify and smoke-accept the packaged artifact
+        run: |
+          $archives = Get-ChildItem -Path dist -File | Where-Object { $_.Name -match '\.(tar\.gz|zip)$' }
+          if ($archives.Count -ne 1) { throw "Expected exactly one package archive, got $($archives.Count)" }
+          python .github/scripts/smoke_host.py $archives[0].FullName
       - uses: actions/upload-artifact@v4
         with:
           name: package-${{ matrix.target }}
-          path: dist/*
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256
           if-no-files-found: error
           retention-days: 14
           compression-level: 0

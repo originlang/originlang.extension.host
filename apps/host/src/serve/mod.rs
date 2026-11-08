@@ -50,7 +50,7 @@ pub fn serve(settings: &Settings) -> Result<(), ServeError> {
     // values so a conflicting precedence chain is visible.
     if settings.log_level.is_debug() {
         eprintln!(
-            "oext-host effective config: transport={:?} backend={:?} home={} require_signature={} startup={}",
+            "ol-host effective config: transport={:?} backend={:?} home={} require_signature={} startup={}",
             settings.transport,
             settings.backend,
             settings.home.display(),
@@ -70,7 +70,7 @@ fn serve_stdio(settings: &Settings) -> Result<(), ServeError> {
     host.startup().map_err(|error| ServeError::Failure(error.to_string()))?;
 
     eprintln!(
-        "oext-host {} serving JSON-RPC on stdio (runtime: {})",
+        "ol-host {} serving JSON-RPC on stdio (runtime: {})",
         crate::config::HOST_VERSION,
         host.runtime_kind()
     );
@@ -532,7 +532,7 @@ mod tests {
 
     #[test]
     fn handshake_accepts_matching_major_and_rejects_mismatch() {
-        let dir = std::env::temp_dir().join(format!("oext-host-handshake-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ol-host-handshake-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let host = Host::new(
             originlang_ext_host::HostConfig::new(originlang_ext_host::Paths::new(&dir))

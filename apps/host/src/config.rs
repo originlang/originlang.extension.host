@@ -110,10 +110,10 @@ struct ConfigFile {
 
 pub fn print_usage() {
     println!(
-        "oext-host {} — independent extension host service
+        "ol-host {} — independent extension host service
 
 USAGE:
-    oext-host [OPTIONS]
+    ol-host [OPTIONS]
 
 OPTIONS:
     --transport <stdio|tcp|http>   Transport to serve (default: stdio; alias 'std')
@@ -307,7 +307,7 @@ mod tests {
 
     #[test]
     fn config_file_rejects_unknown_keys() {
-        let dir = std::env::temp_dir().join(format!("oext-host-config-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ol-host-config-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("config.toml");
         std::fs::write(&path, "home = \"/tmp/x\"\nunknown_key = 1\n").unwrap();

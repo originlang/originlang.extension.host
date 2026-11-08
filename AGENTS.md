@@ -5,7 +5,7 @@
 ## 职责与交付
 
 - Host 是扩展运行基础设施，负责安装、校验、授权、生命周期、后端路由、扩展存储、事件与定时任务。
-- 本仓库交付可独立下载和运行的 Host 服务、内部 Rust 库及独立沙箱执行体 `oext-sandbox`。服务启动参数属于本项目，通用用户 CLI 属于 `bootidea.cli`。
+- 本仓库优先交付可独立下载和运行的 Host 服务 `bin/oext-host`（Windows 为 `bin/oext-host.exe`），并维护内部 Rust 库。`oext-sandbox` 的源码当前位于本仓库，是否由本仓库交付待定，不作为当前 Host 交付的前置条件。服务启动参数属于本项目，通用用户 CLI 属于 `bootidea.cli`。
 - 执行后端包括进程外 sandbox、进程内 QuickJS 和原生 dylib；明确区分资源限制、进程隔离与操作系统权限隔离。
 - dylib 插件共享宿主地址空间，仅用于可信代码，能力授权不能强制约束其直接文件或网络访问。
 

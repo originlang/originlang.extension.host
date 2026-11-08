@@ -1,8 +1,11 @@
-//! `oext-host` — the independent host service.
+//! `ol-host` — the independent host service.
 //!
 //! This binary owns the server entry point and the transport. It is the only
 //! thing a client (CLI, HomeWorld, Desktop) needs to download and run; it does
-//! not require the `bootidea` CLI to be installed.
+//! not require the `bootidea` CLI to be installed. `ol-host` is the sole
+//! official service entry; the previous name `oext-host` is not shipped as an
+//! alias, so consumers must start the new name (see the migration note in
+//! `docs/service-contract.md` §1.2).
 //!
 //! Contract: see `docs/service-contract.md` (H01) and `docs/release-contract.md`
 //! (H02). The behaviour here is defined by that contract, not the reverse.
@@ -31,7 +34,7 @@ fn main() -> ExitCode {
     let args = match config::Args::parse() {
         Ok(args) => args,
         Err(error) => {
-            eprintln!("oext-host: {error}");
+            eprintln!("ol-host: {error}");
             return ExitCode::from(exit::USAGE);
         }
     };
@@ -48,7 +51,7 @@ fn main() -> ExitCode {
     let settings = match config::load(&args) {
         Ok(settings) => settings,
         Err(error) => {
-            eprintln!("oext-host: {error}");
+            eprintln!("ol-host: {error}");
             return ExitCode::from(exit::USAGE);
         }
     };
@@ -57,15 +60,15 @@ fn main() -> ExitCode {
     match outcome {
         Ok(()) => ExitCode::from(exit::OK),
         Err(serve::ServeError::Conflict(message)) => {
-            eprintln!("oext-host: {message}");
+            eprintln!("ol-host: {message}");
             ExitCode::from(exit::CONFLICT)
         }
         Err(serve::ServeError::Protocol(message)) => {
-            eprintln!("oext-host: {message}");
+            eprintln!("ol-host: {message}");
             ExitCode::from(exit::PROTOCOL)
         }
         Err(serve::ServeError::Failure(message)) => {
-            eprintln!("oext-host: {message}");
+            eprintln!("ol-host: {message}");
             ExitCode::from(exit::FAILURE)
         }
     }

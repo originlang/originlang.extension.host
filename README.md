@@ -2,7 +2,9 @@
 
 以 Rust 实现的扩展宿主平台：负责扩展的**安装、授权、隔离执行、状态持久化、定时任务与事件分发**，并可经 JSON-RPC 对外提供服务。
 
-本仓库产出**库与两个执行体**：宿主是 `originlang-ext-host` crate；服务入口是 `oext-host` 可执行文件（`apps/host`），执行侧是 `oext-sandbox` 可执行文件（`apps/sandbox`）。`oext-host` 是独立交付的服务进程，可自行启动、握手、执行请求并退出，不依赖 `bootidea.cli`；CLI 与 HomeWorld 通过版本化协议连接它（见 [docs/service-contract.md](docs/service-contract.md) 与 [docs/release-contract.md](docs/release-contract.md)）。
+本仓库当前包含**库与两个执行体的源码**：宿主是 `originlang-ext-host` crate；服务入口是 `oext-host` 可执行文件（`apps/host`），执行侧是 `oext-sandbox` 可执行文件（`apps/sandbox`）。`oext-host` 是独立交付的服务进程，可自行启动、握手、执行请求并退出，不依赖 `bootidea.cli`；CLI 与 HomeWorld 通过版本化协议连接它（见 [docs/service-contract.md](docs/service-contract.md) 与 [docs/release-contract.md](docs/release-contract.md)）。
+
+当前优先交付 `bin/oext-host`（Windows 为 `bin/oext-host.exe`）；`oext-sandbox` 是否由本仓库交付待定，不作为当前 Host 交付的前置条件。消费者不得假定发布包附带沙箱，应按发布清单与运行期握手确认。
 
 当前版本 `0.1.0`，提供三个执行后端：默认的**进程外沙箱**（每实例一个 `oext-sandbox` 进程）、**进程内 QuickJS 工作线程**，以及给一等方插件用的**动态库**。`oext-host` 默认按清单里的 `runtime` 字段逐个路由，一份进程里可以同时跑脚本插件与原生插件；取舍见 [docs/backends.md](docs/backends.md)。
 
@@ -219,6 +221,5 @@ workspace 根通过 `[workspace.package].version` 声明统一版本，全部成
 无需任何额外 secret 或 token 配置。发布用 `gh release create`（`GITHUB_TOKEN`）即可，因为它直接在 tag 触发的同一工作流内完成，不依赖「tag 触发下游工作流」的能力。
 
 工具链由 `rust-toolchain.toml` 指定，Cargo 使用 `--locked`，需提交 Cargo.lock。
-产物包括 Windows x64 ZIP、Linux x64 tar.gz 和 SHA-256；每个包包含 `oext-sandbox`、
-README、CHANGELOG、文档及示例。宿主库不在包内——它由 Cargo 依赖引入；命令行入口也不在包内，它由 `bootidea.cli` 独立发布。Linux 包在 Ubuntu 24.04 构建，需要兼容的 glibc；未提供 musl 包。
+现有打包脚本生成 Windows x64 ZIP、Linux x64 tar.gz 和 SHA-256，仍沿用仅打包沙箱的旧布局，尚未满足当前 Host 交付要求。下一步须优先改为交付 `bin/oext-host` 及发布契约规定的元数据、文档与示例；`oext-sandbox` 是否由本仓库交付待定。内部 Rust 库不作为包内执行体；通用用户 CLI 由 `bootidea.cli` 独立发布。Linux 包在 Ubuntu 24.04 构建，需要兼容的 glibc；未提供 musl 包。
 普通 CI 产物保留 14 天，发行产物保存到 GitHub Release。
